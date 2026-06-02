@@ -1,0 +1,20 @@
+@PropSeguro.Api_HostAddress = http://localhost:5288
+@analysisId = 00000000-0000-0000-0000-000000000000
+
+POST {{PropSeguro.Api_HostAddress}}/api/property-analyses
+Content-Type: application/json
+
+{
+  "title": "Departamento 3 ambientes en Palermo",
+  "listingUrl": "https://example.com/listing/123",
+  "address": "Av. Santa Fe 3200",
+  "neighborhood": "Palermo",
+  "priceUsd": 180000,
+  "monthlyExpenses": 95000,
+  "notes": "Visita realizada el sabado."
+}
+
+###
+
+GET {{PropSeguro.Api_HostAddress}}/api/property-analyses/{{analysisId}}
+Accept: application/json
