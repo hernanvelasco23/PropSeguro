@@ -1,91 +1,128 @@
 # PropSeguro
 
-PropSeguro - Segunda opinion inteligente para compradores inmobiliarios en Argentina.
+PropSeguro es el repositorio y backend de la marca visible **PropSegura**: una segunda opinion antes de comprar una propiedad en Argentina.
 
-## MVP vertical slice
+La aplicacion permite cargar propiedades, comparar oportunidades, completar datos faltantes y validar documentacion cuando el comprador esta listo para avanzar.
 
-This repository currently implements the first backend slice: create and retrieve a property analysis.
+## Roadmap
 
-The API accepts:
+Prioridad actual:
 
-- Property title.
-- Listing URL.
-- Address.
-- Neighborhood.
-- Price in USD.
-- Monthly expenses.
-- Optional notes.
+1. Property Dashboard: ver y comparar propiedades cargadas.
+2. OCR fallback: mejorar extraccion cuando el PDF no trae texto legible.
+3. Buyer Report export: generar un reporte para revisar o compartir.
+4. Shareable analysis link: compartir un analisis con otra persona.
 
-The API returns:
+Mas adelante:
 
-- Analysis id.
-- Initial deterministic risk score.
-- Basic risk findings.
-- Missing documentation checklist.
+- Fotos y analisis visual.
+- Vision analysis.
+- Autenticacion.
+- Pagos.
 
-No authentication, payments, document uploads, AI agents, or frontend are implemented yet.
+## Arquitectura
 
-## Architecture
+- `src/PropSeguro.Domain`: entidades de dominio y reglas deterministicas.
+- `src/PropSeguro.Application`: comandos, queries, DTOs y abstracciones.
+- `src/PropSeguro.Infrastructure`: EF Core, SQL Server, migraciones, storage local y servicios externos simples.
+- `src/PropSeguro.Api`: endpoints Web API, Swagger y CORS de desarrollo.
+- `frontend/propseguro-web`: SPA en React + Vite + TypeScript.
 
-- `src/PropSeguro.Domain`: domain entities and deterministic analysis rules.
-- `src/PropSeguro.Application`: CQRS commands, queries, DTOs, and application abstractions.
-- `src/PropSeguro.Infrastructure`: EF Core DbContext, SQL Server configuration, and migrations.
-- `src/PropSeguro.Api`: ASP.NET Core Web API endpoints and Swagger.
+## Funcionalidades principales
 
-## Requirements
+- Crear analisis de una propiedad desde datos basicos.
+- Importar datos iniciales desde un link de publicacion cuando sea posible.
+- Ver `OpportunityScore`, `ProtectionScore`, uso recomendado y riesgo inicial.
+- Ver rango de negociacion estimado.
+- Subir documentos PDF y guardar texto extraido o editado.
+- Analizar reservas con reglas deterministicas para detectar clausulas riesgosas.
+- Usar el dashboard para retomar propiedades y completar datos o documentacion mas tarde.
 
-- .NET SDK.
-- SQL Server or LocalDB.
+## Property Dashboard
 
-The planning docs requested .NET 9. This workspace currently has .NET 8 installed, so the projects target `net8.0` for local buildability. Upgrade the target frameworks to `net9.0` after installing the .NET 9 SDK.
+En la home, la seccion **Propiedades analizadas** muestra todas las propiedades cargadas.
 
-## Run locally
+Desde el dashboard podes:
 
-The development connection string uses SQL Server LocalDB with Windows Integrated Security by default:
+- Crear una nueva propiedad con **Nueva propiedad**.
+- Abrir una propiedad existente con **Continuar analisis**.
+- Completar datos faltantes con **Completar datos**.
+- Ir a la validacion documental con **Validar documentacion**.
+- Filtrar por barrio, uso recomendado y riesgo inicial.
+- Ordenar por mayor `OpportunityScore`, menor precio, menor USD/m2 o mas recientes.
 
-```text
-Server=(localdb)\MSSQLLocalDB;Database=PropSeguroDb;Trusted_Connection=True;MultipleActiveResultSets=true;TrustServerCertificate=True
+Cada tarjeta muestra precio, USD/m2, expensas, metros, `OpportunityScore`, `ProtectionScore`, documentos faltantes y hallazgos detectados.
+
+## Backend
+
+Endpoints principales:
+
+- `POST /api/property-analyses`: crea un analisis.
+- `GET /api/property-analyses`: lista resumenes para el dashboard.
+- `GET /api/property-analyses/{id}`: obtiene el detalle completo.
+- `PUT /api/property-analyses/{id}`: actualiza datos incompletos y recalcula oportunidad.
+- `POST /api/listing-imports`: intenta importar datos desde una publicacion.
+- `POST /api/property-analyses/{id}/documents`: sube un documento PDF.
+- `PUT /api/property-analyses/{analysisId}/documents/{documentId}/text`: guarda texto extraido/editado.
+- `POST /api/property-analyses/{analysisId}/documents/{documentId}/analyze`: analiza el documento.
+
+## Ejecutar localmente
+
+Backend:
+
+```powershell
+dotnet run --project src/PropSeguro.Api
 ```
 
-You can change `DefaultConnection` in `src/PropSeguro.Api/appsettings.Development.json` if you use a different local SQL Server instance. Avoid using `sa` credentials for local development.
+Frontend:
 
-Create or update the local database by applying the EF Core migration:
+```powershell
+cd frontend/propseguro-web
+npm install
+npm run dev
+```
+
+El frontend usa `VITE_API_BASE_URL`; ver `frontend/propseguro-web/.env.example`.
+
+## Base de datos
+
+La cadena de conexion de desarrollo esta en:
+
+```text
+src/PropSeguro.Api/appsettings.Development.json
+```
+
+Aplicar migraciones:
 
 ```powershell
 dotnet ef database update --project src/PropSeguro.Infrastructure --startup-project src/PropSeguro.Api
 ```
 
-If `dotnet ef` is not installed, install it with:
+## Validacion
+
+Build backend:
 
 ```powershell
-dotnet tool install --global dotnet-ef
+dotnet build PropSeguro.sln
 ```
 
-Run the API:
+Tests backend:
 
 ```powershell
-dotnet run --project src/PropSeguro.Api --launch-profile http
+dotnet test PropSeguro.sln
 ```
 
-Open Swagger at the URL shown in the console, usually:
+Build frontend:
 
-```text
-http://localhost:5288/swagger
+```powershell
+cd frontend/propseguro-web
+npm run build
 ```
 
-## Example request
+## Notas de producto
 
-```http
-POST /api/property-analyses
-Content-Type: application/json
-
-{
-  "title": "Departamento 3 ambientes en Palermo",
-  "listingUrl": "https://example.com/listing/123",
-  "address": "Av. Santa Fe 3200",
-  "neighborhood": "Palermo",
-  "priceUsd": 180000,
-  "monthlyExpenses": 95000,
-  "notes": "Visita realizada el sabado."
-}
-```
+- No hay autenticacion ni pagos.
+- No hay OCR todavia.
+- No hay analisis de imagenes ni fotos.
+- La logica actual es deterministica.
+- El analisis documental no reemplaza la revision de un escribano o abogado.

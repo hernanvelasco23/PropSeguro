@@ -4,7 +4,7 @@
 
 PropSeguro is a buyer-side second-opinion platform for residential property purchases in Argentina. The MVP will let a prospective buyer submit a property listing or manual property details, optionally upload supporting documents, and receive a simple risk assessment with missing documentation, risk signals, and a practical buyer checklist.
 
-The MVP should establish the core workflow, domain model, persistence model, API boundaries, and future-ready integration points for AI-assisted document analysis and risk detection.
+The MVP should establish the core workflow, domain model, persistence model, API boundaries, and future-ready integration points for text-only AI-assisted document analysis and risk detection.
 
 ## Problem
 
@@ -21,7 +21,7 @@ The MVP addresses this by giving buyers a structured, plain-language review befo
 - Generate a buyer checklist tailored to the property and submitted information.
 - Return a simple risk score and explanation.
 - Store review submissions, documents, detected findings, checklist items, and scoring results.
-- Keep the architecture ready for future AI agents without coupling the MVP to a specific AI provider.
+- Keep the architecture ready for future text-only AI agents without coupling the MVP to a specific AI provider.
 
 ## Non-Goals
 
@@ -30,6 +30,7 @@ The MVP addresses this by giving buyers a structured, plain-language review befo
 - No payment processing.
 - No user-facing frontend implementation in this change.
 - No real AI document analysis implementation in the first code slice.
+- No image generation, image generation tools, or image model configuration.
 - No scraping implementation unless explicitly added later; listing URLs are stored as inputs and may be parsed in the future.
 - No multi-tenant enterprise administration.
 
@@ -133,7 +134,7 @@ The MVP should return a simple score:
 - A risk score is calculated and persisted.
 - The application follows Clean Architecture and CQRS with MediatR.
 - SQL Server persistence is implemented through EF Core.
-- AI analysis can be added later through an application abstraction without changing the core workflow.
+- Text-only AI analysis can be added later through an application abstraction without changing the core workflow.
 
 ## Key Risks
 

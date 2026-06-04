@@ -12,6 +12,17 @@ public sealed record CreatePropertyAnalysisCommand(
     string Neighborhood,
     decimal? PriceUsd,
     decimal? MonthlyExpenses,
+    decimal? TotalSquareMeters,
+    decimal? CoveredSquareMeters,
+    int? Rooms,
+    int? Bedrooms,
+    int? Bathrooms,
+    int? BuildingAgeYears,
+    int? Floor,
+    bool? HasBalcony,
+    bool? HasAmenities,
+    bool? IsCreditEligible,
+    PropertyCondition? PropertyCondition,
     string? Notes) : IRequest<PropertyAnalysisDto>;
 
 public sealed class CreatePropertyAnalysisCommandHandler(IApplicationDbContext dbContext)
@@ -41,6 +52,17 @@ public sealed class CreatePropertyAnalysisCommandHandler(IApplicationDbContext d
             request.Neighborhood,
             request.PriceUsd,
             request.MonthlyExpenses,
+            request.TotalSquareMeters,
+            request.CoveredSquareMeters,
+            request.Rooms,
+            request.Bedrooms,
+            request.Bathrooms,
+            request.BuildingAgeYears,
+            request.Floor,
+            request.HasBalcony,
+            request.HasAmenities,
+            request.IsCreditEligible,
+            request.PropertyCondition,
             request.Notes);
 
         analysis.RunInitialAnalysis();

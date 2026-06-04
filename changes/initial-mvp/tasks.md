@@ -42,8 +42,8 @@
   - [ ] `IRiskSignalAnalyzer`.
   - [ ] `IChecklistGenerator`.
   - [ ] `IRiskScoringService`.
-  - [ ] Future-facing `IDocumentAnalysisService`.
-  - [ ] Future-facing `IListingExtractionService`.
+  - [ ] Future-facing text-only `IDocumentAnalysisService`.
+  - [ ] Future-facing text-only `IListingExtractionService`.
 - [ ] Implement `CreatePropertyReviewCommand`.
 - [ ] Implement `UploadReviewDocumentCommand`.
 - [ ] Implement `AnalyzePropertyReviewCommand`.
@@ -106,6 +106,7 @@
 
 - [ ] Add SQL Server connection string configuration.
 - [ ] Add document storage root configuration for local development.
+- [ ] If AI is added later, configure only a text model; do not configure image generation tools or image models.
 - [ ] Add environment-specific settings.
 - [ ] Add database migration instructions.
 - [ ] Add local development startup instructions.
@@ -117,13 +118,14 @@
 - [ ] Add user-friendly finding titles and recommendations.
 - [ ] Add checklist language tailored to Argentine property purchases.
 
-## 10. Future AI Integration Preparation
+## 10. Future Text-Only AI Integration Preparation
 
 - [ ] Keep document analysis behind `IDocumentAnalysisService`.
 - [ ] Keep listing parsing behind `IListingExtractionService`.
 - [ ] Keep risk detection extension points separate from deterministic MVP rules.
 - [ ] Store enough document metadata to support later re-analysis.
 - [ ] Consider storing extracted facts and agent trace data in a later migration.
+- [ ] Do not add image generation tool configuration, image generation endpoints, or image model names.
 
 ## 11. Acceptance Criteria
 
@@ -135,4 +137,4 @@
 - [ ] The system returns a buyer checklist.
 - [ ] The system returns a persisted risk score and risk level.
 - [ ] The solution builds and tests pass.
-- [ ] The design remains ready for future AI-backed analysis without changing the public API shape unnecessarily.
+- [ ] The design remains ready for future text-only AI-backed analysis without changing the public API shape unnecessarily.

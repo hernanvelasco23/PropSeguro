@@ -12,11 +12,24 @@ public sealed class GetPropertyAnalysisQueryHandler(IApplicationDbContext dbCont
     public async Task<PropertyAnalysisDto?> Handle(GetPropertyAnalysisQuery request, CancellationToken cancellationToken)
     {
         var analysis = await dbContext.PropertyAnalyses
+            .Include(item => item.Documents)
             .Include(item => item.RiskFindings)
             .Include(item => item.ChecklistItems)
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == request.Id, cancellationToken);
 
-        return analysis?.ToDto();
+        if (analysis is null)
+        {
+            return null;
+        }
+
+        var documentFindings = await dbContext.DocumentFindings
+            .Where(item => item.PropertyAnalysisId == request.Id)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        analysis.RecalculateOpportunityScore();
+
+        return analysis.ToDto(documentFindings);
     }
 }
