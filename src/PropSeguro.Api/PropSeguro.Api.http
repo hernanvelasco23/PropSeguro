@@ -1,5 +1,6 @@
 @PropSeguro.Api_HostAddress = http://localhost:5288
 @analysisId = 00000000-0000-0000-0000-000000000000
+@documentId = 00000000-0000-0000-0000-000000000000
 
 POST {{PropSeguro.Api_HostAddress}}/api/property-analyses
 Content-Type: application/json
@@ -11,6 +12,17 @@ Content-Type: application/json
   "neighborhood": "Palermo",
   "priceUsd": 180000,
   "monthlyExpenses": 95000,
+  "totalSquareMeters": 60,
+  "coveredSquareMeters": 54,
+  "rooms": 3,
+  "bedrooms": 2,
+  "bathrooms": 1,
+  "buildingAgeYears": 12,
+  "floor": 8,
+  "hasBalcony": true,
+  "hasAmenities": true,
+  "isCreditEligible": true,
+  "propertyCondition": "Good",
   "notes": "Visita realizada el sabado."
 }
 
@@ -18,3 +30,28 @@ Content-Type: application/json
 
 GET {{PropSeguro.Api_HostAddress}}/api/property-analyses/{{analysisId}}
 Accept: application/json
+
+###
+
+POST {{PropSeguro.Api_HostAddress}}/api/property-analyses/{{analysisId}}/documents
+Content-Type: multipart/form-data; boundary=upload
+
+--upload
+Content-Disposition: form-data; name="documentType"
+
+Expenses
+--upload
+Content-Disposition: form-data; name="file"; filename="expensas.pdf"
+Content-Type: application/pdf
+
+< ./expensas.pdf
+--upload--
+
+###
+
+POST {{PropSeguro.Api_HostAddress}}/api/property-analyses/{{analysisId}}/documents/{{documentId}}/analyze
+Content-Type: application/json
+
+{
+  "extractedText": "Se informan expensas extraordinarias y deuda pendiente."
+}

@@ -6,7 +6,7 @@ The MVP should use Clean Architecture with clear dependency direction:
 
 - Domain: business entities, value objects, enums, domain rules, and domain events.
 - Application: CQRS commands and queries, MediatR handlers, DTOs, interfaces, validation, and orchestration.
-- Infrastructure: EF Core, SQL Server persistence, document storage implementation, external service adapters, and future AI provider adapters.
+- Infrastructure: EF Core, SQL Server persistence, document storage implementation, external service adapters, and future text-only AI provider adapters.
 - API: ASP.NET Core Web API controllers/endpoints, request/response contracts, authentication when introduced, and error mapping.
 
 Dependencies should flow inward. Domain should not depend on Application, Infrastructure, or API. Application should depend on Domain and abstractions. Infrastructure should implement Application abstractions.
@@ -340,9 +340,11 @@ Initial endpoints:
 
 The API should return problem details for validation and domain errors.
 
-## Future AI Integration
+## Future Text-Only AI Integration
 
 The MVP should define interfaces but use deterministic implementations.
+
+Future AI-backed services must use text-only model configuration. The application must not configure image generation tools, image generation endpoints, or image models.
 
 Future abstractions:
 
@@ -359,7 +361,7 @@ Expected future capabilities:
 - Detect inconsistencies between listing data and documents.
 - Produce natural-language explanations for findings.
 
-The Application layer should depend only on interfaces. Infrastructure can later add AI-backed adapters.
+The Application layer should depend only on interfaces. Infrastructure can later add text-only AI-backed adapters.
 
 ## Security and Compliance
 
