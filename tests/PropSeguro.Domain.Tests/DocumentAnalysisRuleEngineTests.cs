@@ -17,6 +17,33 @@ public sealed class DocumentAnalysisRuleEngineTests
     }
 
     [Fact]
+    public void Expenses_with_debt_or_morosidad_creates_financial_finding()
+    {
+        var document = CreateDocument(DocumentType.Expenses);
+
+        var findings = DocumentAnalysisRuleEngine.Analyze(document, "Se informa deuda y morosidad en el consorcio.");
+
+        Assert.Contains(findings, finding =>
+            finding.Category == FindingCategory.Financial &&
+            finding.Severity == FindingSeverity.High &&
+            finding.Title == "Deuda o morosidad detectada" &&
+            finding.BuyerImpact is not null);
+    }
+
+    [Fact]
+    public void Expenses_with_humidity_or_filtration_creates_operational_finding()
+    {
+        var document = CreateDocument(DocumentType.Expenses);
+
+        var findings = DocumentAnalysisRuleEngine.Analyze(document, "Se detecta humedad y filtracion en partes comunes.");
+
+        Assert.Contains(findings, finding =>
+            finding.Category == FindingCategory.Operational &&
+            finding.Severity == FindingSeverity.Medium &&
+            finding.MatchedText is not null);
+    }
+
+    [Fact]
     public void ReservationAgreement_with_non_refundable_text_creates_legal_finding()
     {
         var document = CreateDocument(DocumentType.ReservationAgreement);
@@ -28,7 +55,9 @@ public sealed class DocumentAnalysisRuleEngineTests
             finding.Severity == FindingSeverity.High &&
             finding.Title == "Reserva no reintegrable" &&
             finding.SuggestedQuestion is not null &&
-            finding.SuggestedChange is not null);
+            finding.SuggestedChange is not null &&
+            finding.SuggestedNegotiationPoint is not null &&
+            finding.MatchedText is not null);
     }
 
     [Fact]

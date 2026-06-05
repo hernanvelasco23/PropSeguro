@@ -38,6 +38,8 @@ public sealed class SavePropertyDocumentTextCommandHandler(IApplicationDbContext
             document.ExtractedText,
             document.EditedText,
             document.TextExtractionStatus.ToString(),
+            document.TextExtractionQuality.ToString(),
+            document.LastAnalyzedTextSource?.ToString(),
             document.UploadedAtUtc,
             document.Status.ToString(),
             document.AnalysisStatus.ToString(),

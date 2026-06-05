@@ -1,0 +1,12 @@
+<svg width="640" height="420" viewBox="0 0 640 420" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Sin imagen</title>
+  <desc id="desc">Placeholder de propiedad sin imagen principal.</desc>
+  <rect width="640" height="420" rx="24" fill="#F1F7FA"/>
+  <rect x="28" y="28" width="584" height="364" rx="18" fill="#FFFFFF" stroke="#DCE8EF" stroke-width="2"/>
+  <circle cx="320" cy="170" r="62" fill="#E8F7F4"/>
+  <path d="M272 165L320 126L368 165V222C368 228.627 362.627 234 356 234H284C277.373 234 272 228.627 272 222V165Z" stroke="#0B766F" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M304 234V190H336V234" stroke="#0B766F" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M258 174L320 122L382 174" stroke="#0B223D" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="320" y="304" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="800" fill="#0B223D">Sin imagen</text>
+  <text x="320" y="340" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="600" fill="#5E6F84">Agregá una foto para reconocer esta propiedad</text>
+</svg>

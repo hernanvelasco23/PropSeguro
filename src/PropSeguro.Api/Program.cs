@@ -10,6 +10,7 @@ using PropSeguro.Application.PropertyAnalyses.GetPropertyAnalysis;
 using PropSeguro.Application.PropertyAnalyses.SavePropertyDocumentText;
 using PropSeguro.Application.PropertyAnalyses.ListPropertyAnalyses;
 using PropSeguro.Application.PropertyAnalyses.UpdatePropertyAnalysis;
+using PropSeguro.Application.PropertyAnalyses.UploadPropertyCoverImage;
 using PropSeguro.Domain.PropertyAnalyses;
 using PropSeguro.Infrastructure;
 
@@ -206,12 +207,140 @@ propertyAnalyses.MapDelete("/{id:guid}", async (
 })
 .WithName("DeletePropertyAnalysis");
 
+propertyAnalyses.MapPost("/{id:guid}/cover-image", async (
+    Guid id,
+    HttpRequest request,
+    ISender sender,
+    IWebHostEnvironment environment,
+    CancellationToken cancellationToken) =>
+{
+    if (!request.HasFormContentType)
+    {
+        return Results.BadRequest(new
+        {
+            error = "The request must be multipart/form-data."
+        });
+    }
+
+    var existingAnalysis = await sender.Send(new GetPropertyAnalysisQuery(id), cancellationToken);
+
+    if (existingAnalysis is null)
+    {
+        return Results.NotFound();
+    }
+
+    var form = await request.ReadFormAsync(cancellationToken);
+    var file = form.Files.GetFile("file");
+
+    if (file is null || file.Length == 0)
+    {
+        return Results.BadRequest(new
+        {
+            error = "An image file is required."
+        });
+    }
+
+    if (file.Length > Program.MaxCoverImageSizeBytes)
+    {
+        return Results.BadRequest(new
+        {
+            error = "The cover image must be 5 MB or smaller."
+        });
+    }
+
+    if (!Program.IsAllowedCoverImageContentType(file.ContentType))
+    {
+        return Results.BadRequest(new
+        {
+            error = "Only JPEG, PNG or WEBP images are allowed."
+        });
+    }
+
+    var extension = Program.GetCoverImageExtension(file.ContentType, file.FileName);
+    var safeFileName = $"cover-{Guid.NewGuid():N}{extension}";
+    var storagePath = string.Join(
+        '/',
+        "storage",
+        "property-analyses",
+        id.ToString("D"),
+        "cover",
+        safeFileName);
+    var fullPath = Path.Combine(Program.GetStorageRoot(environment.ContentRootPath), storagePath.Replace('/', Path.DirectorySeparatorChar));
+
+    Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+
+    await using (var stream = File.Create(fullPath))
+    {
+        await file.CopyToAsync(stream, cancellationToken);
+    }
+
+    try
+    {
+        var result = await sender.Send(new UploadPropertyCoverImageCommand(
+            id,
+            Path.GetFileName(file.FileName),
+            file.ContentType,
+            file.Length,
+            storagePath), cancellationToken);
+
+        if (result is null)
+        {
+            File.Delete(fullPath);
+            return Results.NotFound();
+        }
+
+        return Results.Ok(result);
+    }
+    catch (ArgumentException exception)
+    {
+        File.Delete(fullPath);
+        return Results.BadRequest(new
+        {
+            error = exception.Message
+        });
+    }
+    catch
+    {
+        File.Delete(fullPath);
+        throw;
+    }
+})
+.WithName("UploadPropertyCoverImage");
+
+propertyAnalyses.MapGet("/{id:guid}/cover-image", async Task<IResult> (
+    Guid id,
+    ISender sender,
+    IWebHostEnvironment environment,
+    CancellationToken cancellationToken) =>
+{
+    var analysis = await sender.Send(new GetPropertyAnalysisQuery(id), cancellationToken);
+
+    if (analysis?.CoverImageStoragePath is null || analysis.CoverImageContentType is null)
+    {
+        return Results.NotFound();
+    }
+
+    var fullPath = Path.Combine(
+        Program.GetStorageRoot(environment.ContentRootPath),
+        analysis.CoverImageStoragePath.Replace('/', Path.DirectorySeparatorChar));
+
+    if (!File.Exists(fullPath))
+    {
+        return Results.NotFound();
+    }
+
+    var bytes = await File.ReadAllBytesAsync(fullPath, cancellationToken);
+    return Results.File(bytes, analysis.CoverImageContentType, analysis.CoverImageFileName);
+})
+.WithName("GetPropertyCoverImage");
+
 propertyAnalyses.MapPost("/{id:guid}/documents", async (
     Guid id,
     HttpRequest request,
     ISender sender,
     IWebHostEnvironment environment,
     IPdfTextExtractor pdfTextExtractor,
+    IPdfOcrTextExtractor pdfOcrTextExtractor,
     CancellationToken cancellationToken) =>
 {
     if (!request.HasFormContentType)
@@ -262,12 +391,28 @@ propertyAnalyses.MapPost("/{id:guid}/documents", async (
 
     string? extractedText = null;
     string? extractionError = null;
+    TextExtractionQuality? textExtractionQuality = null;
+    string? extractionSummary = null;
 
     if (string.Equals(file.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
     {
         try
         {
             extractedText = await pdfTextExtractor.ExtractTextAsync(fullPath, cancellationToken);
+            textExtractionQuality = DocumentTextQualityEvaluator.Evaluate(documentType, extractedText);
+
+            if (DocumentTextQualityEvaluator.ShouldAttemptOcr(documentType, extractedText))
+            {
+                var ocrResult = await pdfOcrTextExtractor.ExtractTextAsync(fullPath, documentType, cancellationToken);
+
+                if (!string.IsNullOrWhiteSpace(ocrResult.Text))
+                {
+                    extractedText = ocrResult.Text;
+                    textExtractionQuality = ocrResult.Quality;
+                }
+
+                extractionSummary = ocrResult.Warning;
+            }
         }
         catch
         {
@@ -286,7 +431,9 @@ propertyAnalyses.MapPost("/{id:guid}/documents", async (
             file.Length,
             storagePath,
             extractedText,
-            extractionError), cancellationToken);
+            extractionError,
+            textExtractionQuality,
+            extractionSummary), cancellationToken);
 
         if (result is null)
         {
@@ -394,6 +541,8 @@ public sealed record SavePropertyDocumentTextRequest(string? EditedText);
 
 public partial class Program
 {
+    public const long MaxCoverImageSizeBytes = 5 * 1024 * 1024;
+
     internal static string GetStorageRoot(string contentRootPath)
     {
         var directory = new DirectoryInfo(contentRootPath);
@@ -409,5 +558,45 @@ public partial class Program
         }
 
         return contentRootPath;
+    }
+
+    internal static bool IsAllowedCoverImageContentType(string? contentType)
+    {
+        return string.Equals(contentType, "image/jpeg", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(contentType, "image/png", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(contentType, "image/webp", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static string GetCoverImageExtension(string contentType, string? fileName)
+    {
+        var extension = Path.GetExtension(fileName);
+
+        if (!string.IsNullOrWhiteSpace(extension))
+        {
+            extension = extension.ToLowerInvariant();
+
+            if (contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) && extension is ".jpg" or ".jpeg")
+            {
+                return extension;
+            }
+
+            if (contentType.Equals("image/png", StringComparison.OrdinalIgnoreCase) && extension == ".png")
+            {
+                return extension;
+            }
+
+            if (contentType.Equals("image/webp", StringComparison.OrdinalIgnoreCase) && extension == ".webp")
+            {
+                return extension;
+            }
+        }
+
+        return contentType.ToLowerInvariant() switch
+        {
+            "image/jpeg" => ".jpg",
+            "image/png" => ".png",
+            "image/webp" => ".webp",
+            _ => ".img"
+        };
     }
 }

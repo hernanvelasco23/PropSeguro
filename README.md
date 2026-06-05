@@ -15,7 +15,6 @@ Prioridad actual:
 
 Mas adelante:
 
-- Fotos y analisis visual.
 - Vision analysis.
 - Autenticacion.
 - Pagos.
@@ -34,6 +33,7 @@ Mas adelante:
 - Importar datos iniciales desde un link de publicacion cuando sea posible.
 - Ver `OpportunityScore`, `ProtectionScore`, uso recomendado y riesgo inicial.
 - Ver rango de negociacion estimado.
+- Cargar una imagen principal para reconocer cada propiedad.
 - Subir documentos PDF y guardar texto extraido o editado.
 - Analizar reservas con reglas deterministicas para detectar clausulas riesgosas.
 - Usar el dashboard para retomar propiedades y completar datos o documentacion mas tarde.
@@ -61,6 +61,8 @@ Endpoints principales:
 - `GET /api/property-analyses`: lista resumenes para el dashboard.
 - `GET /api/property-analyses/{id}`: obtiene el detalle completo.
 - `PUT /api/property-analyses/{id}`: actualiza datos incompletos y recalcula oportunidad.
+- `POST /api/property-analyses/{id}/cover-image`: sube una imagen principal JPEG, PNG o WEBP de hasta 5 MB.
+- `GET /api/property-analyses/{id}/cover-image`: sirve la imagen principal cargada.
 - `POST /api/listing-imports`: intenta importar datos desde una publicacion.
 - `POST /api/property-analyses/{id}/documents`: sube un documento PDF.
 - `PUT /api/property-analyses/{analysisId}/documents/{documentId}/text`: guarda texto extraido/editado.
@@ -122,7 +124,7 @@ npm run build
 ## Notas de producto
 
 - No hay autenticacion ni pagos.
-- No hay OCR todavia.
-- No hay analisis de imagenes ni fotos.
+- Hay una imagen principal por propiedad solo para identificacion visual.
+- No hay galeria, analisis de imagenes ni vision artificial.
 - La logica actual es deterministica.
 - El analisis documental no reemplaza la revision de un escribano o abogado.

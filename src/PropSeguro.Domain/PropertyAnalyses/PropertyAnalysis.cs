@@ -97,6 +97,11 @@ public sealed class PropertyAnalysis
     public decimal? SuggestedTargetPriceUsd { get; private set; }
     public decimal? NegotiationMarginPercent { get; private set; }
     public string NegotiationExplanation { get; private set; }
+    public string? CoverImageFileName { get; private set; }
+    public string? CoverImageContentType { get; private set; }
+    public long? CoverImageSizeBytes { get; private set; }
+    public string? CoverImageStoragePath { get; private set; }
+    public DateTime? CoverImageUploadedAtUtc { get; private set; }
     public AnalysisStatus Status { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
@@ -117,6 +122,36 @@ public sealed class PropertyAnalysis
         UpdatedAtUtc = DateTime.UtcNow;
 
         return document;
+    }
+
+    public void SetCoverImage(string fileName, string contentType, long sizeBytes, string storagePath)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            throw new ArgumentException("Cover image file name is required.", nameof(fileName));
+        }
+
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            throw new ArgumentException("Cover image content type is required.", nameof(contentType));
+        }
+
+        if (sizeBytes <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sizeBytes), "Cover image size must be positive.");
+        }
+
+        if (string.IsNullOrWhiteSpace(storagePath))
+        {
+            throw new ArgumentException("Cover image storage path is required.", nameof(storagePath));
+        }
+
+        CoverImageFileName = fileName.Trim();
+        CoverImageContentType = contentType.Trim();
+        CoverImageSizeBytes = sizeBytes;
+        CoverImageStoragePath = storagePath.Trim();
+        CoverImageUploadedAtUtc = DateTime.UtcNow;
+        UpdatedAtUtc = CoverImageUploadedAtUtc.Value;
     }
 
     public void UpdatePropertyData(
