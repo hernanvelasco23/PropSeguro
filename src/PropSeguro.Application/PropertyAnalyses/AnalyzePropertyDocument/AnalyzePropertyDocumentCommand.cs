@@ -10,7 +10,9 @@ public sealed record AnalyzePropertyDocumentCommand(
     Guid PropertyDocumentId,
     string? ExtractedText) : IRequest<DocumentAnalysisResultDto?>;
 
-public sealed class AnalyzePropertyDocumentCommandHandler(IApplicationDbContext dbContext)
+public sealed class AnalyzePropertyDocumentCommandHandler(
+    IApplicationDbContext dbContext,
+    IDocumentIntelligenceAnalyzer documentIntelligenceAnalyzer)
     : IRequestHandler<AnalyzePropertyDocumentCommand, DocumentAnalysisResultDto?>
 {
     public async Task<DocumentAnalysisResultDto?> Handle(AnalyzePropertyDocumentCommand request, CancellationToken cancellationToken)
@@ -39,11 +41,10 @@ public sealed class AnalyzePropertyDocumentCommandHandler(IApplicationDbContext 
 
         dbContext.DocumentFindings.RemoveRange(previousFindings);
 
-        var effectiveText = string.IsNullOrWhiteSpace(request.ExtractedText)
-            ? document.ExtractedText
-            : request.ExtractedText;
-
-        var findings = document.CompleteAnalysis(effectiveText);
+        var textSelection = document.SelectTextForAnalysis(request.ExtractedText);
+        var intelligenceResult = await documentIntelligenceAnalyzer.AnalyzeAsync(document, textSelection.Text, cancellationToken);
+        var findings = intelligenceResult.Findings;
+        document.CompleteAnalysis(textSelection.Text, textSelection.Source, findings);
         dbContext.DocumentFindings.AddRange(findings);
 
         var allFindings = await dbContext.DocumentFindings
@@ -60,60 +61,13 @@ public sealed class AnalyzePropertyDocumentCommandHandler(IApplicationDbContext 
             document.Id,
             document.AnalysisStatus.ToString(),
             document.AnalysisSummary,
-            BuildSummary(document, findings),
-            BuildRiskLevel(findings),
+            intelligenceResult.Summary,
+            intelligenceResult.RiskLevel,
             findings.Select(finding => finding.ToDto()).ToArray(),
-            findings
-                .Select(finding => finding.SuggestedQuestion)
-                .OfType<string>()
-                .Where(question => !string.IsNullOrWhiteSpace(question))
-                .Distinct()
-                .ToArray(),
-            findings
-                .Select(finding => finding.SuggestedChange)
-                .OfType<string>()
-                .Where(change => !string.IsNullOrWhiteSpace(change))
-                .Distinct()
-                .ToArray(),
+            intelligenceResult.SuggestedQuestions,
+            intelligenceResult.SuggestedNegotiationPoints,
             BuildBuyerFriendlyExplanation(document, findings),
             analysis.ProtectionScore);
-    }
-
-    private static string BuildSummary(PropertyDocument document, IReadOnlyCollection<DocumentFinding> findings)
-    {
-        if (document.DocumentType != DocumentType.ReservationAgreement)
-        {
-            return document.AnalysisSummary ?? "Analisis documental completado.";
-        }
-
-        return findings.Count == 0
-            ? "No se detectaron clausulas riesgosas con las reglas actuales."
-            : $"Se detectaron {findings.Count} senal(es) para revisar antes de firmar o pagar la reserva.";
-    }
-
-    private static string BuildRiskLevel(IReadOnlyCollection<DocumentFinding> findings)
-    {
-        if (findings.Any(finding => finding.Severity == FindingSeverity.Critical))
-        {
-            return "Critical";
-        }
-
-        if (findings.Any(finding => finding.Severity == FindingSeverity.High))
-        {
-            return "High";
-        }
-
-        if (findings.Any(finding => finding.Severity == FindingSeverity.Medium))
-        {
-            return "Medium";
-        }
-
-        if (findings.Any(finding => finding.Severity == FindingSeverity.Low))
-        {
-            return "Low";
-        }
-
-        return "Info";
     }
 
     private static string BuildBuyerFriendlyExplanation(PropertyDocument document, IReadOnlyCollection<DocumentFinding> findings)

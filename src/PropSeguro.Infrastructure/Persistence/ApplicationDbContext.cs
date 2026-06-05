@@ -50,6 +50,11 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             builder.Property(analysis => analysis.SuggestedTargetPriceUsd).HasColumnType("decimal(18,2)");
             builder.Property(analysis => analysis.NegotiationMarginPercent).HasColumnType("decimal(6,2)");
             builder.Property(analysis => analysis.NegotiationExplanation).HasMaxLength(1000).IsRequired();
+            builder.Property(analysis => analysis.CoverImageFileName).HasMaxLength(300);
+            builder.Property(analysis => analysis.CoverImageContentType).HasMaxLength(150);
+            builder.Property(analysis => analysis.CoverImageSizeBytes);
+            builder.Property(analysis => analysis.CoverImageStoragePath).HasMaxLength(1000);
+            builder.Property(analysis => analysis.CoverImageUploadedAtUtc);
             builder.Property(analysis => analysis.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
             builder.Property(analysis => analysis.CreatedAtUtc).IsRequired();
             builder.Property(analysis => analysis.UpdatedAtUtc).IsRequired();
@@ -95,6 +100,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             builder.Property(document => document.ExtractedText);
             builder.Property(document => document.EditedText);
             builder.Property(document => document.TextExtractionStatus).HasConversion<string>().HasMaxLength(40).IsRequired();
+            builder.Property(document => document.TextExtractionQuality).HasConversion<string>().HasMaxLength(40).IsRequired();
+            builder.Property(document => document.LastAnalyzedTextSource).HasConversion<string>().HasMaxLength(40);
             builder.Property(document => document.AnalysisStatus).HasConversion<string>().HasMaxLength(40).IsRequired();
             builder.Property(document => document.AnalyzedAtUtc);
             builder.Property(document => document.AnalysisSummary).HasMaxLength(1000);
@@ -110,8 +117,11 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             builder.Property(finding => finding.Category).HasConversion<string>().HasMaxLength(80).IsRequired();
             builder.Property(finding => finding.Title).HasMaxLength(200).IsRequired();
             builder.Property(finding => finding.Description).HasMaxLength(1000).IsRequired();
+            builder.Property(finding => finding.BuyerImpact).HasMaxLength(1000);
             builder.Property(finding => finding.SuggestedQuestion).HasMaxLength(1000);
             builder.Property(finding => finding.SuggestedChange).HasMaxLength(1000);
+            builder.Property(finding => finding.SuggestedNegotiationPoint).HasMaxLength(1000);
+            builder.Property(finding => finding.MatchedText).HasMaxLength(500);
             builder.Property(finding => finding.CreatedAtUtc).IsRequired();
 
             builder.HasIndex(finding => finding.PropertyAnalysisId);

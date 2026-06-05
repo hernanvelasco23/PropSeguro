@@ -20,7 +20,24 @@ public static class DependencyInjection
 
         services.AddScoped<IApplicationDbContext>(provider =>
             provider.GetRequiredService<ApplicationDbContext>());
+        services.Configure<PdfOcrOptions>(options =>
+        {
+            options.PdfToPpmPath = configuration["PdfOcr:PdfToPpmPath"];
+            options.TessDataPath = configuration["PdfOcr:TessDataPath"];
+            options.Language = configuration["PdfOcr:Language"] ?? options.Language;
+
+            if (int.TryParse(configuration["PdfOcr:Dpi"], out var dpi))
+            {
+                options.Dpi = dpi;
+            }
+
+            if (int.TryParse(configuration["PdfOcr:MaxPages"], out var maxPages))
+            {
+                options.MaxPages = maxPages;
+            }
+        });
         services.AddScoped<IPdfTextExtractor, PdfPigTextExtractor>();
+        services.AddScoped<IPdfOcrTextExtractor, PdfOcrTextExtractor>();
         services.AddScoped<IListingImporter>(_ => new BasicHtmlListingImporter(new HttpClient
         {
             Timeout = TimeSpan.FromSeconds(12)

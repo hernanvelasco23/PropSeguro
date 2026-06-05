@@ -8,6 +8,9 @@ public sealed class DocumentFinding
         Description = string.Empty;
         SuggestedQuestion = string.Empty;
         SuggestedChange = string.Empty;
+        BuyerImpact = string.Empty;
+        SuggestedNegotiationPoint = string.Empty;
+        MatchedText = string.Empty;
     }
 
     public DocumentFinding(
@@ -18,7 +21,10 @@ public sealed class DocumentFinding
         string title,
         string description,
         string? suggestedQuestion = null,
-        string? suggestedChange = null)
+        string? suggestedChange = null,
+        string? buyerImpact = null,
+        string? suggestedNegotiationPoint = null,
+        string? matchedText = null)
     {
         Id = Guid.NewGuid();
         PropertyDocumentId = propertyDocumentId == Guid.Empty
@@ -33,6 +39,11 @@ public sealed class DocumentFinding
         Description = string.IsNullOrWhiteSpace(description) ? throw new ArgumentException("Finding description is required.", nameof(description)) : description.Trim();
         SuggestedQuestion = string.IsNullOrWhiteSpace(suggestedQuestion) ? null : suggestedQuestion.Trim();
         SuggestedChange = string.IsNullOrWhiteSpace(suggestedChange) ? null : suggestedChange.Trim();
+        BuyerImpact = string.IsNullOrWhiteSpace(buyerImpact) ? null : buyerImpact.Trim();
+        SuggestedNegotiationPoint = string.IsNullOrWhiteSpace(suggestedNegotiationPoint)
+            ? SuggestedChange
+            : suggestedNegotiationPoint.Trim();
+        MatchedText = string.IsNullOrWhiteSpace(matchedText) ? null : matchedText.Trim();
         CreatedAtUtc = DateTime.UtcNow;
     }
 
@@ -43,7 +54,10 @@ public sealed class DocumentFinding
     public FindingCategory Category { get; private set; }
     public string Title { get; private set; }
     public string Description { get; private set; }
+    public string? BuyerImpact { get; private set; }
     public string? SuggestedQuestion { get; private set; }
     public string? SuggestedChange { get; private set; }
+    public string? SuggestedNegotiationPoint { get; private set; }
+    public string? MatchedText { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
 }

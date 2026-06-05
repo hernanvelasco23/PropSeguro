@@ -54,6 +54,7 @@ public sealed class ListPropertyAnalysesQueryHandler(IApplicationDbContext dbCon
                     analysis.ChecklistItems.Count(item => item.IsRequired && !item.IsProvided),
                     analysisFindings.Length,
                     analysisFindings.Count(item => item.Severity == FindingSeverity.Critical),
+                    analysis.GetCoverImageUrl(),
                     analysis.ToNegotiationAnalysisDto());
             })
             .ToArray();

@@ -83,6 +83,22 @@ public enum TextExtractionStatus
     ManuallyEdited = 5
 }
 
+public enum TextExtractionQuality
+{
+    Unknown = 1,
+    Good = 2,
+    Partial = 3,
+    Poor = 4,
+    Empty = 5
+}
+
+public enum LastAnalyzedTextSource
+{
+    ExtractedText = 1,
+    EditedText = 2,
+    ManualText = 3
+}
+
 public enum FindingSeverity
 {
     Info = 1,

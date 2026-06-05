@@ -36,6 +36,12 @@ public sealed record PropertyAnalysisDto(
     decimal? NegotiationMarginPercent,
     string NegotiationExplanation,
     NegotiationAnalysisDto NegotiationAnalysis,
+    string? CoverImageFileName,
+    string? CoverImageContentType,
+    long? CoverImageSizeBytes,
+    string? CoverImageStoragePath,
+    DateTime? CoverImageUploadedAtUtc,
+    string? CoverImageUrl,
     string Status,
     IReadOnlyCollection<RiskFindingDto> RiskFindings,
     IReadOnlyCollection<PropertyDocumentDto> Documents,
@@ -69,6 +75,7 @@ public sealed record PropertyAnalysisSummaryDto(
     int MissingRequiredDocumentsCount,
     int FindingsCount,
     int CriticalFindingsCount,
+    string? CoverImageUrl,
     NegotiationAnalysisDto NegotiationAnalysis);
 
 public sealed record NegotiationAnalysisDto(
@@ -92,7 +99,7 @@ public sealed record DocumentAnalysisResultDto(
     string RiskLevel,
     IReadOnlyCollection<DocumentFindingDto> Findings,
     IReadOnlyCollection<string> SuggestedQuestions,
-    IReadOnlyCollection<string> SuggestedClauseChanges,
+    IReadOnlyCollection<string> SuggestedNegotiationPoints,
     string BuyerFriendlyExplanation,
     int CurrentProtectionScore);
 
@@ -124,6 +131,8 @@ public sealed record PropertyDocumentDto(
     string? ExtractedText,
     string? EditedText,
     string TextExtractionStatus,
+    string TextExtractionQuality,
+    string? LastAnalyzedTextSource,
     DateTime UploadedAtUtc,
     string Status,
     string AnalysisStatus,
@@ -137,8 +146,11 @@ public sealed record DocumentFindingDto(
     string Category,
     string Title,
     string Description,
+    string? BuyerImpact,
     string? SuggestedQuestion,
     string? SuggestedChange,
+    string? SuggestedNegotiationPoint,
+    string? MatchedText,
     DateTime CreatedAtUtc);
 
 public static class PropertyAnalysisMapping
@@ -184,6 +196,12 @@ public static class PropertyAnalysisMapping
             analysis.NegotiationMarginPercent,
             analysis.NegotiationExplanation,
             analysis.ToNegotiationAnalysisDto(),
+            analysis.CoverImageFileName,
+            analysis.CoverImageContentType,
+            analysis.CoverImageSizeBytes,
+            analysis.CoverImageStoragePath,
+            analysis.CoverImageUploadedAtUtc,
+            analysis.GetCoverImageUrl(),
             analysis.Status.ToString(),
             analysis.RiskFindings
                 .OrderByDescending(finding => finding.Severity)
@@ -208,6 +226,8 @@ public static class PropertyAnalysisMapping
                     document.ExtractedText,
                     document.EditedText,
                     document.TextExtractionStatus.ToString(),
+                    document.TextExtractionQuality.ToString(),
+                    document.LastAnalyzedTextSource?.ToString(),
                     document.UploadedAtUtc,
                     document.Status.ToString(),
                     document.AnalysisStatus.ToString(),
@@ -250,8 +270,11 @@ public static class PropertyAnalysisMapping
             finding.Category.ToString(),
             finding.Title,
             finding.Description,
+            finding.BuyerImpact,
             finding.SuggestedQuestion,
             finding.SuggestedChange,
+            finding.SuggestedNegotiationPoint,
+            finding.MatchedText,
             finding.CreatedAtUtc);
     }
 
@@ -270,5 +293,12 @@ public static class PropertyAnalysisMapping
             analysis.SuggestedTargetPriceUsd,
             analysis.NegotiationMarginPercent,
             analysis.NegotiationExplanation);
+    }
+
+    public static string? GetCoverImageUrl(this PropertyAnalysis analysis)
+    {
+        return string.IsNullOrWhiteSpace(analysis.CoverImageStoragePath)
+            ? null
+            : $"/api/property-analyses/{analysis.Id:D}/cover-image";
     }
 }

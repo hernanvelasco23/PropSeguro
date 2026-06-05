@@ -41,6 +41,7 @@ public sealed class PropertyDocument
         StoragePath = string.IsNullOrWhiteSpace(storagePath) ? throw new ArgumentException("Storage path is required.", nameof(storagePath)) : storagePath.Trim();
         Status = DocumentStatus.Uploaded;
         TextExtractionStatus = TextExtractionStatus.NotStarted;
+        TextExtractionQuality = TextExtractionQuality.Unknown;
         AnalysisStatus = DocumentAnalysisStatus.NotStarted;
         UploadedAtUtc = DateTime.UtcNow;
     }
@@ -57,26 +58,35 @@ public sealed class PropertyDocument
     public string? ExtractedText { get; private set; }
     public string? EditedText { get; private set; }
     public TextExtractionStatus TextExtractionStatus { get; private set; }
+    public TextExtractionQuality TextExtractionQuality { get; private set; }
+    public LastAnalyzedTextSource? LastAnalyzedTextSource { get; private set; }
     public DocumentAnalysisStatus AnalysisStatus { get; private set; }
     public DateTime? AnalyzedAtUtc { get; private set; }
     public string? AnalysisSummary { get; private set; }
 
-    public void StoreExtractedText(string? extractedText)
+    public void StoreExtractedText(
+        string? extractedText,
+        TextExtractionQuality? textExtractionQuality = null,
+        string? analysisSummary = null)
     {
         ExtractedText = string.IsNullOrWhiteSpace(extractedText) ? null : extractedText.Trim();
         TextExtractionStatus = ExtractedText is null || ExtractedText.Length < MinimumUsefulExtractedTextLength
             ? TextExtractionStatus.Empty
             : TextExtractionStatus.Extracted;
+        TextExtractionQuality = textExtractionQuality ?? ClassifyTextQuality(ExtractedText);
         AnalysisStatus = DocumentAnalysisStatus.NotStarted;
-        AnalysisSummary = TextExtractionStatus == TextExtractionStatus.Empty
-            ? "No se pudo extraer texto util del PDF. Si es un escaneo, pega el texto manualmente antes de analizar."
-            : "Texto extraido del PDF. Listo para revisar o analizar.";
+        AnalysisSummary = string.IsNullOrWhiteSpace(analysisSummary)
+            ? TextExtractionStatus == TextExtractionStatus.Empty
+                ? "No se pudo extraer texto util del PDF. Si es un escaneo, pega el texto manualmente antes de analizar."
+                : "Texto extraido del PDF. Listo para revisar o analizar."
+            : analysisSummary.Trim();
     }
 
     public void MarkExtractionFailed(string message)
     {
         ExtractedText = null;
         TextExtractionStatus = TextExtractionStatus.Failed;
+        TextExtractionQuality = TextExtractionQuality.Empty;
         AnalysisStatus = DocumentAnalysisStatus.Failed;
         AnalysisSummary = string.IsNullOrWhiteSpace(message)
             ? "No se pudo extraer texto del PDF."
@@ -89,31 +99,76 @@ public sealed class PropertyDocument
         TextExtractionStatus = EditedText is null
             ? TextExtractionStatus.Empty
             : TextExtractionStatus.ManuallyEdited;
+        TextExtractionQuality = ClassifyTextQuality(EditedText);
         AnalysisStatus = DocumentAnalysisStatus.NotStarted;
         AnalysisSummary = EditedText is null
             ? "No hay texto disponible para analizar."
             : "Texto corregido guardado. Listo para analizar.";
     }
 
-    public IReadOnlyCollection<DocumentFinding> CompleteAnalysis(string? text)
+    public DocumentTextSelection SelectTextForAnalysis(string? requestText)
     {
-        if (!string.IsNullOrWhiteSpace(text))
+        if (!string.IsNullOrWhiteSpace(EditedText))
         {
-            SaveEditedText(text);
+            return new DocumentTextSelection(EditedText, global::PropSeguro.Domain.PropertyAnalyses.LastAnalyzedTextSource.EditedText);
         }
 
-        var analysisText = !string.IsNullOrWhiteSpace(EditedText)
-            ? EditedText
-            : ExtractedText;
+        if (!string.IsNullOrWhiteSpace(requestText))
+        {
+            return new DocumentTextSelection(requestText.Trim(), global::PropSeguro.Domain.PropertyAnalyses.LastAnalyzedTextSource.ManualText);
+        }
 
+        return new DocumentTextSelection(ExtractedText, global::PropSeguro.Domain.PropertyAnalyses.LastAnalyzedTextSource.ExtractedText);
+    }
+
+    public void CompleteAnalysis(string? analyzedText, LastAnalyzedTextSource textSource, IReadOnlyCollection<DocumentFinding> findings)
+    {
+        if (textSource == global::PropSeguro.Domain.PropertyAnalyses.LastAnalyzedTextSource.ManualText)
+        {
+            SaveEditedText(analyzedText);
+        }
+
+        LastAnalyzedTextSource = textSource;
         AnalysisStatus = DocumentAnalysisStatus.Completed;
         AnalyzedAtUtc = DateTime.UtcNow;
-
-        var findings = DocumentAnalysisRuleEngine.Analyze(this, analysisText);
+        TextExtractionQuality = ClassifyTextQuality(analyzedText);
         AnalysisSummary = findings.Count == 0
             ? "Analisis completado sin hallazgos determinantes. Esto no reemplaza la revision de un escribano o abogado."
             : $"Analisis completado con {findings.Count} hallazgo(s). Esto no reemplaza la revision de un escribano o abogado.";
+    }
+
+    public IReadOnlyCollection<DocumentFinding> CompleteAnalysis(string? text)
+    {
+        var selection = SelectTextForAnalysis(text);
+        var findings = DocumentAnalysisRuleEngine.Analyze(this, selection.Text);
+        CompleteAnalysis(selection.Text, selection.Source, findings);
 
         return findings;
     }
+
+    private static TextExtractionQuality ClassifyTextQuality(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return TextExtractionQuality.Empty;
+        }
+
+        var length = text.Trim().Length;
+
+        if (length >= 600)
+        {
+            return TextExtractionQuality.Good;
+        }
+
+        if (length >= 150)
+        {
+            return TextExtractionQuality.Partial;
+        }
+
+        return length >= MinimumUsefulExtractedTextLength
+            ? TextExtractionQuality.Poor
+            : TextExtractionQuality.Empty;
+    }
 }
+
+public sealed record DocumentTextSelection(string? Text, LastAnalyzedTextSource Source);

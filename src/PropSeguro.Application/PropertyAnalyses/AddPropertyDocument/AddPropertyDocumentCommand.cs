@@ -14,7 +14,9 @@ public sealed record AddPropertyDocumentCommand(
     long SizeBytes,
     string StoragePath,
     string? ExtractedText,
-    string? ExtractionError) : IRequest<PropertyAnalysisDto?>;
+    string? ExtractionError,
+    TextExtractionQuality? TextExtractionQuality = null,
+    string? ExtractionSummary = null) : IRequest<PropertyAnalysisDto?>;
 
 public sealed class AddPropertyDocumentCommandHandler(IApplicationDbContext dbContext)
     : IRequestHandler<AddPropertyDocumentCommand, PropertyAnalysisDto?>
@@ -47,7 +49,10 @@ public sealed class AddPropertyDocumentCommandHandler(IApplicationDbContext dbCo
         }
         else if (string.Equals(request.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
         {
-            document.StoreExtractedText(request.ExtractedText);
+            document.StoreExtractedText(
+                request.ExtractedText,
+                request.TextExtractionQuality,
+                request.ExtractionSummary);
         }
 
         dbContext.PropertyDocuments.Add(document);

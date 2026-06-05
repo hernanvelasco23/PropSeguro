@@ -73,6 +73,10 @@ namespace PropSeguro.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("BuyerImpact")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<string>("Category")
                         .IsRequired()
                         .HasMaxLength(80)
@@ -86,6 +90,10 @@ namespace PropSeguro.Infrastructure.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<string>("MatchedText")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<Guid>("PropertyAnalysisId")
                         .HasColumnType("uniqueidentifier");
 
@@ -98,6 +106,10 @@ namespace PropSeguro.Infrastructure.Migrations
                         .HasColumnType("nvarchar(40)");
 
                     b.Property<string>("SuggestedChange")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("SuggestedNegotiationPoint")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
@@ -143,6 +155,24 @@ namespace PropSeguro.Infrastructure.Migrations
 
                     b.Property<int?>("BuildingAgeYears")
                         .HasColumnType("int");
+
+                    b.Property<string>("CoverImageContentType")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<string>("CoverImageFileName")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<long?>("CoverImageSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("CoverImageStoragePath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("CoverImageUploadedAtUtc")
+                        .HasColumnType("datetime2");
 
                     b.Property<decimal?>("CoveredSquareMeters")
                         .HasColumnType("decimal(10,2)");
@@ -293,6 +323,10 @@ namespace PropSeguro.Infrastructure.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
+                    b.Property<string>("LastAnalyzedTextSource")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
                     b.Property<Guid>("PropertyAnalysisId")
                         .HasColumnType("uniqueidentifier");
 
@@ -308,6 +342,11 @@ namespace PropSeguro.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("TextExtractionQuality")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
 
                     b.Property<string>("TextExtractionStatus")
                         .IsRequired()

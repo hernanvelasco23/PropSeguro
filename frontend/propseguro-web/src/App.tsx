@@ -7,6 +7,7 @@ import {
   PropertyAnalysisSummary,
   PropertyCondition,
   PropertyDocument,
+  resolveApiUrl,
   addDocument,
   analyzeDocument,
   createAnalysis,
@@ -15,8 +16,10 @@ import {
   importListing,
   listAnalyses,
   saveDocumentText,
-  updateAnalysis
+  updateAnalysis,
+  uploadCoverImage
 } from './api';
+import propertyPlaceholder from './assets/property-placeholder.svg';
 
 const documentTypes: DocumentType[] = [
   'Expenses',
@@ -142,6 +145,19 @@ export function App() {
     setPath(to);
   }
 
+  function navigateToLandingSection(sectionId?: string) {
+    navigate('/');
+
+    if (!sectionId) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    window.setTimeout(() => {
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  }
+
   async function refreshDashboard() {
     setLoading(true);
     setError(null);
@@ -225,19 +241,28 @@ export function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <button className="brand-button" type="button" onClick={() => navigate('/')}>
+        <button className="brand-button" type="button" onClick={() => navigateToLandingSection()}>
           <span className="brand-mark">PS</span>
           <span>PropSegura</span>
         </button>
         <nav className="topnav" aria-label="Navegación principal">
-          <button className={path === '/' ? 'topnav-link active' : 'topnav-link'} type="button" onClick={() => navigate('/')}>
+          <button className={path === '/' ? 'topnav-link active' : 'topnav-link'} type="button" onClick={() => navigateToLandingSection()}>
             Inicio
           </button>
-          <button className={path === '/properties' ? 'topnav-link active' : 'topnav-link'} type="button" onClick={() => navigate('/properties')}>
-            Propiedades
+          <button className="topnav-link" type="button" onClick={() => navigateToLandingSection('process')}>
+            Cómo funciona
           </button>
-          <button className={path === '/properties/new' ? 'topbar-cta active' : 'topbar-cta'} type="button" onClick={() => navigate('/properties/new')}>
-            Nueva propiedad
+          <button className="topnav-link" type="button" onClick={() => navigateToLandingSection('guarantee')}>
+            Garantía
+          </button>
+          <button className="topnav-link" type="button" onClick={() => navigateToLandingSection('faq')}>
+            Preguntas frecuentes
+          </button>
+          <button className="topnav-link" type="button" onClick={() => navigateToLandingSection('contact')}>
+            Contacto
+          </button>
+          <button className={path === '/properties' ? 'topbar-cta active' : 'topbar-cta'} type="button" onClick={() => navigate('/properties')}>
+            Ingresar
           </button>
         </nav>
       </header>
@@ -304,7 +329,15 @@ export function App() {
         </section>
       )}
       <footer className="app-footer">
-        PropSegura — Segunda opinión para comprar una propiedad con menos riesgo.
+        <div>
+          <strong>PropSegura</strong>
+          <span>Segunda opinión para compradores inmobiliarios.</span>
+        </div>
+        <nav aria-label="Navegación secundaria">
+          <button type="button" onClick={() => navigateToLandingSection('process')}>Cómo funciona</button>
+          <button type="button" onClick={() => navigateToLandingSection('faq')}>Preguntas frecuentes</button>
+          <button type="button" onClick={() => navigateToLandingSection('contact')}>Contacto</button>
+        </nav>
       </footer>
     </main>
   );
@@ -318,17 +351,19 @@ function LandingPage({
   onDashboard: () => void;
 }) {
   return (
-    <>
-      <section className="hero">
+    <div className="landing-page">
+      <section className="hero landing-hero">
         <div className="hero-content">
-          <p className="eyebrow">La segunda opinión antes de comprar una propiedad</p>
-          <h1>Comprá una propiedad con más información y menos riesgo</h1>
+          <p className="eyebrow">COMPRÁ CON MÁS INFORMACIÓN Y MENOS RIESGO</p>
+          <h1>
+            Tomá mejores decisiones
+            <br />
+            antes de <span>reservar</span>
+            <br />
+            o <span>comprar.</span>
+          </h1>
           <p className="hero-copy">
-            No necesitás tener todos los papeles para empezar.
-            <br />
-            Primero evaluá si vale la pena avanzar.
-            <br />
-            Después validá la documentación antes de reservar.
+            Analizamos la propiedad, la documentación y los riesgos ocultos para que sepas exactamente a qué te enfrentás.
           </p>
           <div className="hero-actions">
             <button className="primary-button large-button" type="button" onClick={onCreate}>
@@ -337,51 +372,44 @@ function LandingPage({
             <button className="secondary-button large-button" type="button" onClick={onDashboard}>
               Ver propiedades cargadas
             </button>
-            <a className="secondary-link" href="#process">
-              Ver cómo funciona
-            </a>
           </div>
+          <p className="trust-note">
+            No reemplaza la revisión de un escribano o abogado. Te damos una segunda opinión para ayudarte a tomar mejores decisiones.
+          </p>
         </div>
-        <div className="hero-visual" aria-hidden="true">
-          <div className="property-card">
-            <span className="property-chip">Palermo</span>
-            <div className="property-window-grid">
-              <span />
-              <span />
-              <span />
-              <span />
-            </div>
-            <div className="property-score">
+
+        <div className="landing-photo-wrap" aria-label="Compradores visitando una propiedad">
+          <div className="landing-photo" />
+          <div className="analysis-preview-card">
+            <div className="preview-score-row">
+              <span>Score de oportunidad</span>
               <strong>82</strong>
-              <span>Oportunidad</span>
             </div>
+            <div className="preview-score-row">
+              <span>Score de protección</span>
+              <strong>68</strong>
+            </div>
+            <Badge tone="success">Uso recomendado: inversión</Badge>
           </div>
         </div>
       </section>
 
-      <section className="panel product-explainer">
-        <div>
-          <p className="eyebrow">Producto</p>
-          <h2>Una vista simple para decidir mejor antes de reservar</h2>
-        </div>
-        <div className="benefit-grid">
-          <article>
-            <strong>Evaluación inicial</strong>
-            <p>Compará precio, metros, expensas, estado y barrio para entender si vale la pena avanzar.</p>
-          </article>
-          <article>
-            <strong>Validación documental</strong>
-            <p>Cuando tengas papeles, revisá faltantes y señales de riesgo antes de comprometer dinero.</p>
-          </article>
-          <article>
-            <strong>Decisión más segura</strong>
-            <p>Usá el análisis para preguntar, negociar o frenar a tiempo.</p>
-          </article>
-        </div>
+      <section className="benefits-strip" aria-label="Beneficios principales">
+        <BenefitCard icon="✓" title="Evaluación completa" text="Analizamos precio, zona, documentación y riesgos." />
+        <BenefitCard icon="▤" title="Validación documental" text="Detectamos documentos faltantes y posibles problemas." />
+        <BenefitCard icon="!" title="Riesgos ocultos" text="Encontramos cláusulas peligrosas, deudas y problemas edilicios." />
+        <BenefitCard icon="▥" title="Decisión más segura" text="Toda la información que necesitás para negociar mejor." />
       </section>
 
       <ProcessSection />
-    </>
+
+      <section className="security-note landing-support" id="guarantee">
+        <span className="security-icon" aria-hidden="true">▣</span>
+        <p>
+          <strong>Tus datos están protegidos.</strong> La información que cargás es confidencial y solo la usás vos.
+        </p>
+      </section>
+    </div>
   );
 }
 
@@ -520,16 +548,21 @@ function PropertyDashboard({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const totalPages = Math.max(1, Math.ceil(analyses.length / pageSize));
+  const [searchTerm, setSearchTerm] = useState('');
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
+  const searchedAnalyses = analyses.filter((analysis) => matchesDashboardSearch(analysis, searchTerm));
+  const dashboardStats = getDashboardStats(analyses);
+  const featured = getFeaturedAnalyses(analyses);
+  const totalPages = Math.max(1, Math.ceil(searchedAnalyses.length / pageSize));
   const currentPage = Math.min(page, totalPages);
-  const visibleAnalyses = analyses.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const visibleAnalyses = searchedAnalyses.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   useEffect(() => {
     setPage(1);
-  }, [analyses.length, neighborhoodFilter, recommendedUseFilter, riskFilter, sortBy, pageSize]);
+  }, [analyses.length, neighborhoodFilter, recommendedUseFilter, riskFilter, sortBy, pageSize, searchTerm]);
 
   async function handleDelete(analysis: PropertyAnalysisSummary) {
-    const confirmed = window.confirm(`¿Eliminar "${analysis.title}"? Esta acción no se puede deshacer.`);
+    const confirmed = window.confirm('¿Eliminar "' + analysis.title + '"? Esta acción no se puede deshacer.');
 
     if (!confirmed) {
       return;
@@ -544,126 +577,281 @@ function PropertyDashboard({
   }
 
   return (
-    <section className="panel dashboard-panel dashboard-page">
-      <div className="section-heading dashboard-heading">
-        <div>
-          <p className="eyebrow">Panel</p>
-          <h2>Propiedades cargadas</h2>
-          <p className="section-copy">Compará oportunidades, completá datos faltantes y continuá el análisis cuando quieras.</p>
+    <section className="dashboard-v2-page">
+      <div className="dashboard-v2-hero">
+        <div className="dashboard-v2-title">
+          <h2>Mis oportunidades inmobiliarias</h2>
+          <p>Compará propiedades, identificá riesgos y decidí dónde avanzar.</p>
+          <div className="dashboard-actions">
+            <button className="primary-button dashboard-primary-action" type="button" onClick={onCreate}>
+              <span aria-hidden="true">+</span>
+              Nueva propiedad
+            </button>
+            <button className="secondary-button dashboard-secondary-action" type="button" onClick={() => void onRefresh()}>
+              <span aria-hidden="true">↻</span>
+              Actualizar análisis
+            </button>
+          </div>
         </div>
-        <div className="dashboard-actions">
-          <button className="ghost-button" type="button" onClick={() => void onRefresh()}>
-            Actualizar
-          </button>
-          <button className="primary-button" type="button" onClick={onCreate}>
-            Nueva propiedad
-          </button>
+
+        <div className="dashboard-kpi-grid">
+          <DashboardKpiCard icon="⌂" value={dashboardStats.total} title="Propiedades cargadas" helper="Total en tu cuenta" tone="teal" />
+          <DashboardKpiCard icon="✓" value={dashboardStats.recommended} title="Recomendadas" helper="Buen potencial" tone="teal" />
+          <DashboardKpiCard icon="!" value={dashboardStats.highRisk} title="Riesgo alto" helper="Requieren atención" tone="danger" />
+          <DashboardKpiCard icon="▥" value={dashboardStats.averageOpportunity} title="Promedio oportunidad" helper="Score promedio" tone="blue" />
         </div>
       </div>
 
-      <div className="dashboard-filters compact-filters">
-        <label className="field">
-          <span>Barrio</span>
-          <select value={neighborhoodFilter} onChange={(event) => onNeighborhoodFilter(event.target.value)}>
-            <option value="">Todos</option>
-            {neighborhoods.map((neighborhood) => (
-              <option key={neighborhood} value={neighborhood}>{neighborhood}</option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Uso</span>
-          <select value={recommendedUseFilter} onChange={(event) => onRecommendedUseFilter(event.target.value)}>
-            <option value="">Todos</option>
-            {['Living', 'Investment', 'Both', 'NotRecommended', 'Unknown'].map((value) => (
-              <option key={value} value={value}>{recommendedUseLabel(value)}</option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Riesgo</span>
-          <select value={riskFilter} onChange={(event) => onRiskFilter(event.target.value)}>
-            <option value="">Todos</option>
-            {['Low', 'Medium', 'High'].map((value) => (
-              <option key={value} value={value}>{riskLevelLabel(value)}</option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Orden</span>
-          <select value={sortBy} onChange={(event) => onSortBy(event.target.value as DashboardSort)}>
-            <option value="newest">Más recientes</option>
-            <option value="title">Propiedad</option>
-            <option value="neighborhood">Barrio</option>
-            <option value="highestOpportunity">Mayor oportunidad</option>
-            <option value="highestProtection">Mayor protección</option>
-            <option value="lowestPrice">Menor precio</option>
-            <option value="totalSquareMeters">Metros totales</option>
-            <option value="lowestUsdPerSquareMeter">Menor USD/m²</option>
-            <option value="recommendedUse">Uso recomendado</option>
-            <option value="bestInvestment">Mejor para inversión</option>
-            <option value="bestLiving">Mejor para vivienda</option>
-          </select>
-        </label>
-      </div>
-
-      {analyses.length === 0 ? (
-        <div className="empty-state dashboard-empty">
-          <strong>Todavía no cargaste propiedades.</strong>
-          <button className="primary-button" type="button" onClick={onCreate}>
-            Analizar primera propiedad
-          </button>
-        </div>
-      ) : (
-        <div className="comparison-table-wrap">
-          <table className="comparison-table">
-            <thead>
-              <tr>
-                <SortableHeader label="Propiedad" sortKey="title" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
-                <SortableHeader label="Barrio" sortKey="neighborhood" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
-                <SortableHeader label="Precio" sortKey="lowestPrice" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
-                <SortableHeader label="m²" sortKey="totalSquareMeters" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
-                <SortableHeader label="USD/m²" sortKey="lowestUsdPerSquareMeter" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
-                <SortableHeader label="Oportunidad" sortKey="highestOpportunity" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
-                <SortableHeader label="Protección" sortKey="highestProtection" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
-                <SortableHeader label="Uso" sortKey="recommendedUse" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleAnalyses.map((analysis) => (
-                <PropertyDashboardRow
-                  key={analysis.id}
-                  analysis={analysis}
-                  deleting={deletingId === analysis.id}
-                  onOpen={onOpen}
-                  onDelete={handleDelete}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
       {analyses.length > 0 && (
-        <div className="pagination-bar" aria-label="Paginación de propiedades">
-          <button className="ghost-button" type="button" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={currentPage === 1}>
-            Anterior
-          </button>
-          <span>Página {currentPage} de {totalPages}</span>
-          <button className="ghost-button" type="button" onClick={() => setPage((value) => Math.min(totalPages, value + 1))} disabled={currentPage === totalPages}>
-            Siguiente
-          </button>
-          <label className="page-size">
-            <span>Filas</span>
-            <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}>
-              {[10, 25, 50].map((size) => (
-                <option key={size} value={size}>{size}</option>
-              ))}
-            </select>
-          </label>
+        <div className="featured-opportunities">
+          <FeaturedOpportunityCard
+            eyebrow="Mejor oportunidad"
+            icon="🏆"
+            analysis={featured.bestOpportunity}
+            scoreLabel="Opportunity Score"
+            onOpen={onOpen}
+            tone="success"
+          />
+          <FeaturedOpportunityCard
+            eyebrow="Mejor para inversión"
+            icon="↗"
+            analysis={featured.bestInvestment}
+            scoreLabel="Opportunity Score"
+            onOpen={onOpen}
+            tone="success"
+          />
+          <AttentionOpportunityCard count={dashboardStats.needsAttention} analysis={featured.needsAttention} onOpen={onOpen} />
         </div>
       )}
+
+      <div className="dashboard-table-shell">
+        <div className="dashboard-toolbar">
+          <div className="view-switch" aria-label="Seleccionar vista">
+            <button className={viewMode === 'table' ? 'active' : ''} type="button" onClick={() => setViewMode('table')}>
+              ☰ Vista tabla
+            </button>
+            <button className={viewMode === 'cards' ? 'active' : ''} type="button" onClick={() => setViewMode('cards')}>
+              ▦ Vista tarjetas
+            </button>
+          </div>
+
+          <div className="dashboard-search-and-filters">
+            <label className="dashboard-search">
+              <span className="sr-only">Buscar</span>
+              <input
+                type="search"
+                value={searchTerm}
+                placeholder="Buscar propiedad, barrio o uso..."
+                onChange={(event) => setSearchTerm(event.target.value)}
+              />
+              <span aria-hidden="true">⌕</span>
+            </label>
+            <label className="dashboard-select">
+              <span>Barrio</span>
+              <select value={neighborhoodFilter} onChange={(event) => onNeighborhoodFilter(event.target.value)}>
+                <option value="">Todos</option>
+                {neighborhoods.map((neighborhood) => (
+                  <option key={neighborhood} value={neighborhood}>{neighborhood}</option>
+                ))}
+              </select>
+            </label>
+            <label className="dashboard-select">
+              <span>Uso</span>
+              <select value={recommendedUseFilter} onChange={(event) => onRecommendedUseFilter(event.target.value)}>
+                <option value="">Todos</option>
+                {['Living', 'Investment', 'Both', 'NotRecommended', 'Unknown'].map((value) => (
+                  <option key={value} value={value}>{recommendedUseLabel(value)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="dashboard-select">
+              <span>Riesgo</span>
+              <select value={riskFilter} onChange={(event) => onRiskFilter(event.target.value)}>
+                <option value="">Todos</option>
+                {['Low', 'Medium', 'High'].map((value) => (
+                  <option key={value} value={value}>{riskLevelLabel(value)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="dashboard-select">
+              <span>Orden</span>
+              <select value={sortBy} onChange={(event) => onSortBy(event.target.value as DashboardSort)}>
+                <option value="newest">Más recientes</option>
+                <option value="highestOpportunity">Mayor oportunidad</option>
+                <option value="highestProtection">Mayor protección</option>
+                <option value="lowestPrice">Menor precio</option>
+                <option value="lowestUsdPerSquareMeter">Menor USD/m²</option>
+                <option value="recommendedUse">Uso recomendado</option>
+                <option value="bestInvestment">Mejor para inversión</option>
+                <option value="bestLiving">Mejor para vivienda</option>
+                <option value="title">Propiedad</option>
+                <option value="neighborhood">Barrio</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        {analyses.length === 0 ? (
+          <div className="empty-state dashboard-empty">
+            <strong>Todavía no cargaste propiedades.</strong>
+            <button className="primary-button" type="button" onClick={onCreate}>
+              Analizar primera propiedad
+            </button>
+          </div>
+        ) : viewMode === 'cards' ? (
+          <div className="dashboard-card-view-note">
+            <strong>Vista tarjetas</strong>
+            <p>Próximamente vas a poder comparar cada oportunidad en formato de tarjetas. Por ahora, usá la vista tabla para operar.</p>
+          </div>
+        ) : searchedAnalyses.length === 0 ? (
+          <div className="empty-state dashboard-empty">
+            <strong>No encontramos propiedades con esos filtros.</strong>
+            <p>Probá ajustar la búsqueda, el barrio, el uso o el riesgo.</p>
+          </div>
+        ) : (
+          <div className="comparison-table-wrap">
+            <table className="comparison-table">
+              <thead>
+                <tr>
+                  <SortableHeader label="Propiedad" sortKey="title" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
+                  <SortableHeader label="Barrio" sortKey="neighborhood" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
+                  <SortableHeader label="Precio" sortKey="lowestPrice" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
+                  <SortableHeader label="USD/m²" sortKey="lowestUsdPerSquareMeter" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
+                  <SortableHeader label="Oportunidad" sortKey="highestOpportunity" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
+                  <SortableHeader label="Protección" sortKey="highestProtection" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
+                  <SortableHeader label="Uso recomendado" sortKey="recommendedUse" activeSort={sortBy} direction={sortDirection} onSort={onColumnSort} />
+                  <th>Mi opinión</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleAnalyses.map((analysis) => (
+                  <PropertyDashboardRow
+                    key={analysis.id}
+                    analysis={analysis}
+                    deleting={deletingId === analysis.id}
+                    onOpen={onOpen}
+                    onDelete={handleDelete}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {searchedAnalyses.length > 0 && viewMode === 'table' && (
+          <div className="pagination-bar" aria-label="Paginación de propiedades">
+            <button className="ghost-button" type="button" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={currentPage === 1}>
+              Anterior
+            </button>
+            <span>Página {currentPage} de {totalPages}</span>
+            <button className="ghost-button" type="button" onClick={() => setPage((value) => Math.min(totalPages, value + 1))} disabled={currentPage === totalPages}>
+              Siguiente
+            </button>
+            <label className="page-size">
+              <span>Filas</span>
+              <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}>
+                {[10, 25, 50].map((size) => (
+                  <option key={size} value={size}>{size}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+      </div>
+
+      <p className="dashboard-disclaimer">
+        <span aria-hidden="true">▱</span>
+        <strong>Recordá:</strong> PropSegura te da una segunda opinión experta. No reemplaza la revisión de un escribano o abogado.
+      </p>
     </section>
+  );
+}
+
+function DashboardKpiCard({
+  icon,
+  value,
+  title,
+  helper,
+  tone
+}: {
+  icon: string;
+  value: number;
+  title: string;
+  helper: string;
+  tone: 'teal' | 'danger' | 'blue';
+}) {
+  return (
+    <article className={'dashboard-kpi-card dashboard-kpi-' + tone}>
+      <span className="dashboard-kpi-icon" aria-hidden="true">{icon}</span>
+      <strong>{value}</strong>
+      <h3>{title}</h3>
+      <p>{helper}</p>
+    </article>
+  );
+}
+
+function FeaturedOpportunityCard({
+  eyebrow,
+  icon,
+  analysis,
+  scoreLabel,
+  onOpen,
+  tone
+}: {
+  eyebrow: string;
+  icon: string;
+  analysis?: PropertyAnalysisSummary;
+  scoreLabel: string;
+  onOpen: (id: string) => Promise<void>;
+  tone: 'success' | 'warning';
+}) {
+  if (!analysis) {
+    return null;
+  }
+
+  return (
+    <article className={'featured-card featured-' + tone}>
+      <span className="featured-icon" aria-hidden="true">{icon}</span>
+      <div className="featured-main">
+        <span>{eyebrow}</span>
+        <strong>{analysis.title}</strong>
+        <Badge tone={recommendedTone(analysis.recommendedUse)}>{recommendedUseLabel(analysis.recommendedUse)}</Badge>
+      </div>
+      <div className="featured-score">
+        <strong>{analysis.opportunityScore}</strong>
+        <span>{scoreLabel}</span>
+      </div>
+      <button className="featured-link" type="button" onClick={() => void onOpen(analysis.id)}>
+        Ver análisis <span aria-hidden="true">→</span>
+      </button>
+    </article>
+  );
+}
+
+function AttentionOpportunityCard({
+  count,
+  analysis,
+  onOpen
+}: {
+  count: number;
+  analysis?: PropertyAnalysisSummary;
+  onOpen: (id: string) => Promise<void>;
+}) {
+  return (
+    <article className="featured-card featured-warning">
+      <span className="featured-icon" aria-hidden="true">!</span>
+      <div className="featured-main">
+        <span>Requiere atención</span>
+        <strong>{count} {count === 1 ? 'propiedad' : 'propiedades'}</strong>
+        <p>Documentación incompleta o riesgos detectados</p>
+      </div>
+      {analysis && (
+        <button className="featured-link" type="button" onClick={() => void onOpen(analysis.id)}>
+          Ver detalles <span aria-hidden="true">→</span>
+        </button>
+      )}
+    </article>
   );
 }
 
@@ -686,15 +874,35 @@ function SortableHeader({
     <th aria-sort={isActive ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
       <button className={isActive ? 'sortable-heading active' : 'sortable-heading'} type="button" onClick={() => onSort(sortKey)}>
         <span>{label}</span>
-        <span aria-hidden="true">{isActive ? (direction === 'asc' ? '▲' : '▼') : '↕'}</span>
+        <span aria-hidden="true">{isActive ? (direction === 'asc' ? 'Asc' : 'Desc') : 'Ordenar'}</span>
       </button>
     </th>
+  );
+}
+
+function PropertyCoverImage({
+  coverImageUrl,
+  alt,
+  className
+}: {
+  coverImageUrl?: string | null;
+  alt: string;
+  className: string;
+}) {
+  return (
+    <img
+      className={className}
+      src={resolveApiUrl(coverImageUrl) ?? propertyPlaceholder}
+      alt={alt}
+      loading="lazy"
+    />
   );
 }
 
 function PropertyDashboardCard({ analysis, onOpen }: { analysis: PropertyAnalysisSummary; onOpen: (id: string) => Promise<void> }) {
   return (
     <article className="property-dashboard-card">
+      <PropertyCoverImage className="property-card-cover" coverImageUrl={analysis.coverImageUrl} alt={`Imagen de ${analysis.title}`} />
       <div className="property-card-heading">
         <div>
           <h3>{analysis.title}</h3>
@@ -760,17 +968,23 @@ function PropertyDashboardRow({
       }}
     >
       <td>
-        <button className="property-title-button" type="button" onClick={(event) => { event.stopPropagation(); open(); }}>
-          {analysis.title}
-        </button>
+        <div className="dashboard-property-cell">
+          <PropertyCoverImage className="property-thumb" coverImageUrl={analysis.coverImageUrl} alt="" />
+          <div>
+            <button className="property-title-button" type="button" onClick={(event) => { event.stopPropagation(); open(); }}>
+              {analysis.title}
+            </button>
+            <span>{analysis.address || 'Sin dirección cargada'}</span>
+          </div>
+        </div>
       </td>
       <td>{analysis.neighborhood || 'Sin dato'}</td>
       <td>{formatMoney(analysis.priceUsd)}</td>
-      <td>{formatNumber(analysis.totalSquareMeters)}</td>
       <td>{formatMoney(analysis.usdPerSquareMeter)}</td>
-      <td><span className="score-pill score-pill-opportunity">{analysis.opportunityScore}</span></td>
-      <td><span className="score-pill score-pill-protection">{analysis.protectionScore}</span></td>
+      <td><ScoreBadge type="opportunity" score={analysis.opportunityScore} /></td>
+      <td><ScoreBadge type="protection" score={analysis.protectionScore} /></td>
       <td><Badge tone={recommendedTone(analysis.recommendedUse)}>{recommendedUseLabel(analysis.recommendedUse)}</Badge></td>
+      <td><OpinionBadge analysis={analysis} /></td>
       <td>
         <div className="row-actions">
           <button className="text-button" type="button" onClick={(event) => { event.stopPropagation(); open(); }}>
@@ -800,6 +1014,26 @@ function PropertyDashboardRow({
   );
 }
 
+function ScoreBadge({ type, score }: { type: 'opportunity' | 'protection'; score: number }) {
+  return (
+    <span className={`decision-score decision-score-${type} ${scoreClassName(type, score)}`}>
+      <strong>{score}</strong>
+      <span>{scoreBadgeLabel(type, score)}</span>
+    </span>
+  );
+}
+
+function OpinionBadge({ analysis }: { analysis: PropertyAnalysisSummary }) {
+  const opinion = getDashboardOpinion(analysis);
+
+  return (
+    <span className={`opinion-badge opinion-${opinion.tone}`}>
+      <span aria-hidden="true">{opinion.icon}</span>
+      {opinion.label}
+    </span>
+  );
+}
+
 function MiniScore({ label, score, tone }: { label: string; score: number; tone: 'opportunity' | 'protection' }) {
   return (
     <div className={`mini-score mini-score-${tone}`}>
@@ -809,50 +1043,64 @@ function MiniScore({ label, score, tone }: { label: string; score: number; tone:
   );
 }
 
+function BenefitCard({ icon, title, text }: { icon: string; title: string; text: string }) {
+  return (
+    <article className="benefit-card">
+      <span className="benefit-icon" aria-hidden="true">{icon}</span>
+      <div>
+        <strong>{title}</strong>
+        <p>{text}</p>
+      </div>
+    </article>
+  );
+}
+
 function ProcessSection() {
   return (
     <section className="process-section" id="process">
       <div className="section-heading process-heading">
         <div>
-          <p className="eyebrow">Tres pasos claros</p>
+          <p className="eyebrow">Pasos simples</p>
           <h2>Cómo funciona PropSegura</h2>
         </div>
       </div>
       <div className="process-grid">
         <ProcessCard
           step="1"
-          title="Evaluación inicial"
-          text="Empezá con los datos de la publicación: precio, zona, expensas, metros y características."
-          items={['Publicación', 'Precio', 'Zona', 'Expensas']}
+          icon="↥"
+          title="Cargá la propiedad"
+          text="Completá los datos básicos o importalos desde ZonaProp."
         />
         <ProcessCard
           step="2"
-          title="Validación documental"
-          text="Cuando la propiedad te interesa, cargá documentación para detectar riesgos antes de reservar."
-          items={['Actas', 'Reglamento', 'Reserva', 'Informe de dominio']}
+          icon="▤"
+          title="Subí la documentación"
+          text="Reserva, expensas, actas, informes y todo lo que tengas."
         />
         <ProcessCard
           step="3"
-          title="Compra más segura"
-          text="Usá los hallazgos para decidir, negociar o frenar antes de comprometer dinero."
-          items={['Riesgos', 'Preguntas clave', 'Señales de alerta', 'Próximos pasos']}
+          icon="○"
+          title="Analizamos todo"
+          text="Revisamos precios, documentos y detectamos riesgos ocultos."
+        />
+        <ProcessCard
+          step="4"
+          icon="✓"
+          title="Recibís tu informe"
+          text="Obtenés una evaluación clara, hallazgos y próximos pasos."
         />
       </div>
     </section>
   );
 }
 
-function ProcessCard({ step, title, text, items }: { step: string; title: string; text: string; items: string[] }) {
+function ProcessCard({ step, icon, title, text }: { step: string; icon: string; title: string; text: string }) {
   return (
     <article className="process-card">
-      <span className="process-icon">{step}</span>
+      <span className="process-step-number">{step}</span>
+      <span className="process-icon" aria-hidden="true">{icon}</span>
       <h3>{title}</h3>
       <p>{text}</p>
-      <div className="process-checklist">
-        {items.map((item) => (
-          <span key={item}>{item}</span>
-        ))}
-      </div>
     </article>
   );
 }
@@ -871,6 +1119,7 @@ function CreateAnalysisForm({
   const [form, setForm] = useState<CreateFormState>(emptyCreateForm);
   const [importWarnings, setImportWarnings] = useState<string[]>([]);
   const [importConfidence, setImportConfidence] = useState<number | null>(null);
+  const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [importing, setImporting] = useState(false);
 
@@ -922,6 +1171,10 @@ function CreateAnalysisForm({
     onError(null);
 
     try {
+      if (coverImageFile && !isValidCoverImageFile(coverImageFile)) {
+        throw new Error('La imagen principal debe ser JPEG, PNG o WEBP y pesar hasta 5 MB.');
+      }
+
       const created = await createAnalysis({
         title: form.title,
         listingUrl: nullableText(form.listingUrl),
@@ -943,7 +1196,11 @@ function CreateAnalysisForm({
         notes: nullableText(form.notes)
       });
 
-      await onCreated(created);
+      const createdWithCover = coverImageFile
+        ? await uploadCoverImage(created.id, coverImageFile)
+        : created;
+
+      await onCreated(createdWithCover);
     } catch (err) {
       onError(err instanceof Error ? err.message : 'No se pudo crear el análisis.');
     } finally {
@@ -953,99 +1210,239 @@ function CreateAnalysisForm({
   }
 
   return (
-    <section className="panel form-panel">
-      <div className="section-heading">
+    <section className="property-wizard-page">
+      <aside className="wizard-sidebar" aria-label="Progreso de carga">
         <div>
-          <p className="eyebrow">Nuevo análisis</p>
-          <h2>Datos iniciales de la propiedad</h2>
-          <p className="section-copy">
-            No necesitás actas, reglamentos ni planos todavía.
-            <br />
-            Completá la información que tengas de la publicación y obtené una evaluación inicial.
-          </p>
+          <h2>Nueva propiedad</h2>
+          <p>Completá la información en pasos simples.</p>
         </div>
-        <button className="ghost-button" type="button" onClick={onCancel}>
-          Volver
-        </button>
-      </div>
+        <div className="wizard-steps">
+          <WizardStep number="1" title="Información básica" text="Datos principales de la propiedad" state="active" />
+          <WizardStep number="2" title="Precio y características" text="Detalles y especificaciones" state="current" />
+          <WizardStep number="3" title="Documentación" text="Subí los documentos disponibles" />
+          <WizardStep number="4" title="Análisis y revisión" text="Resumen y confirmación" />
+        </div>
+        <div className="wizard-help-card">
+          <span className="wizard-help-icon" aria-hidden="true">◇</span>
+          <strong>¿Necesitás ayuda?</strong>
+          <p>Estamos para ayudarte en cada paso del análisis.</p>
+          <button className="ghost-button" type="button">Contactar soporte</button>
+        </div>
+      </aside>
 
-      <form className="form-grid" onSubmit={handleSubmit}>
-        <FormGroup title="Publicación">
-          <div className="import-row">
-            <TextField label="Pegá el link de la publicación" value={form.listingUrl} onChange={(listingUrl) => setForm({ ...form, listingUrl })} />
-            <button
-              className={`secondary-button ${importing ? 'btn-loading' : ''}`}
-              type="button"
-              onClick={handleImportListing}
-              disabled={importing || !form.listingUrl.trim()}
-              aria-busy={importing ? 'true' : undefined}
-            >
-              {importing && <span className="button-spinner" aria-hidden="true" />}
-              {importing ? 'Cargando...' : 'Importar datos'}
-            </button>
-          </div>
-          {importConfidence !== null && (
-            <div className="import-feedback">
-              <strong>Datos importados con confianza {importConfidence}%.</strong>
-              {importWarnings.length > 0 && (
-                <ul>
-                  {importWarnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
+      <div className="wizard-main">
+        <button className="wizard-back" type="button" onClick={onCancel}>
+          ← Volver a mis oportunidades
+        </button>
+
+        <div className="wizard-content-grid">
+          <form className="wizard-form-card" onSubmit={handleSubmit}>
+            <div className="wizard-card-heading">
+              <h1>Información básica</h1>
+              <p>Datos principales de la propiedad para comenzar el análisis.</p>
+            </div>
+
+            <div className="wizard-import-block">
+              <label className="cover-upload-field">
+                <span>Imagen principal</span>
+                <small>Agregá una foto para reconocer fácilmente la propiedad.</small>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(event) => setCoverImageFile(event.target.files?.[0] ?? null)}
+                />
+                <strong>{coverImageFile ? coverImageFile.name : 'Seleccionar imagen'}</strong>
+              </label>
+              <div className="import-row">
+                <TextField label="Pegá el link de la publicación" value={form.listingUrl} placeholder="https://..." onChange={(listingUrl) => setForm({ ...form, listingUrl })} />
+                <button
+                  className={`secondary-button ${importing ? 'btn-loading' : ''}`}
+                  type="button"
+                  onClick={handleImportListing}
+                  disabled={importing || !form.listingUrl.trim()}
+                  aria-busy={importing ? 'true' : undefined}
+                >
+                  {importing && <span className="button-spinner" aria-hidden="true" />}
+                  {importing ? 'Cargando...' : 'Importar datos'}
+                </button>
+              </div>
+              {importConfidence !== null && (
+                <div className="import-feedback">
+                  <strong>Datos importados con confianza {importConfidence}%.</strong>
+                  {importWarnings.length > 0 && (
+                    <ul>
+                      {importWarnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               )}
             </div>
-          )}
-          <TextField label="Título" value={form.title} required onChange={(title) => setForm({ ...form, title })} />
-        </FormGroup>
-        <FormGroup title="Ubicación">
-          <TextField label="Dirección" value={form.address} required onChange={(address) => setForm({ ...form, address })} />
-          <TextField label="Barrio" value={form.neighborhood} required onChange={(neighborhood) => setForm({ ...form, neighborhood })} />
-        </FormGroup>
-        <FormGroup title="Precio y expensas">
-          <TextField label="Precio USD" type="number" value={form.priceUsd} onChange={(priceUsd) => setForm({ ...form, priceUsd })} />
-          <TextField label="Expensas mensuales" type="number" value={form.monthlyExpenses} onChange={(monthlyExpenses) => setForm({ ...form, monthlyExpenses })} />
-          <TextField label="Metros totales" type="number" value={form.totalSquareMeters} onChange={(totalSquareMeters) => setForm({ ...form, totalSquareMeters })} />
-          <TextField label="Metros cubiertos" type="number" value={form.coveredSquareMeters} onChange={(coveredSquareMeters) => setForm({ ...form, coveredSquareMeters })} />
-        </FormGroup>
-        <FormGroup title="Características">
-          <TextField label="Ambientes" type="number" value={form.rooms} onChange={(rooms) => setForm({ ...form, rooms })} />
-          <TextField label="Dormitorios" type="number" value={form.bedrooms} onChange={(bedrooms) => setForm({ ...form, bedrooms })} />
-          <TextField label="Baños" type="number" value={form.bathrooms} onChange={(bathrooms) => setForm({ ...form, bathrooms })} />
-          <TextField label="Antigüedad del edificio" type="number" value={form.buildingAgeYears} onChange={(buildingAgeYears) => setForm({ ...form, buildingAgeYears })} />
-          <TextField label="Piso" type="number" value={form.floor} onChange={(floor) => setForm({ ...form, floor })} />
-          <SelectField label="Balcón" value={form.hasBalcony} onChange={(hasBalcony) => setForm({ ...form, hasBalcony })} />
-          <SelectField label="Amenities" value={form.hasAmenities} onChange={(hasAmenities) => setForm({ ...form, hasAmenities })} />
-          <SelectField label="Apto crédito" value={form.isCreditEligible} onChange={(isCreditEligible) => setForm({ ...form, isCreditEligible })} />
-          <label className="field">
-            <span>Estado</span>
-            <select value={form.propertyCondition} onChange={(event) => setForm({ ...form, propertyCondition: event.target.value as PropertyCondition })}>
-              {(Object.keys(propertyConditionLabels) as PropertyCondition[]).map((condition) => (
-                <option key={condition} value={condition}>
-                  {propertyConditionLabels[condition]}
-                </option>
-              ))}
-            </select>
-          </label>
-        </FormGroup>
-        <FormGroup title="Objetivo de compra">
-          <label className="field field-wide">
-            <span>Objetivo, dudas o notas</span>
-            <textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
-          </label>
-        </FormGroup>
-        <div className="form-actions">
-          <button
-            className={`primary-button ${submitting ? 'btn-loading' : ''}`}
-            type="submit"
-            disabled={submitting}
-            aria-busy={submitting ? 'true' : undefined}
-          >
-            {submitting && <span className="button-spinner" aria-hidden="true" />}
-            {submitting ? 'Cargando...' : 'Analizar una propiedad'}
-          </button>
+
+            <div className="wizard-field-grid">
+              <TextField label="Título de la propiedad" value={form.title} required placeholder="Ej: Departamento 2 ambientes en Belgrano" onChange={(title) => setForm({ ...form, title })} />
+              <label className="field">
+                <span>Uso recomendado</span>
+                <select disabled value="Both" aria-label="Uso recomendado inicial">
+                  <option>Vivienda e inversión</option>
+                </select>
+              </label>
+              <TextField label="Barrio" value={form.neighborhood} required placeholder="Ej: Recoleta" onChange={(neighborhood) => setForm({ ...form, neighborhood })} />
+              <TextField label="Dirección" value={form.address} required placeholder="Ej: Av. Cabildo 1234" onChange={(address) => setForm({ ...form, address })} />
+              <TextField label="Precio de publicación" type="number" value={form.priceUsd} placeholder="Ej: 85000" onChange={(priceUsd) => setForm({ ...form, priceUsd })} />
+              <TextField label="Expensas mensuales" type="number" value={form.monthlyExpenses} placeholder="Ej: 100000" onChange={(monthlyExpenses) => setForm({ ...form, monthlyExpenses })} />
+              <TextField label="M² totales" type="number" value={form.totalSquareMeters} placeholder="Ej: 55" onChange={(totalSquareMeters) => setForm({ ...form, totalSquareMeters })} />
+              <TextField label="M² cubiertos" type="number" value={form.coveredSquareMeters} placeholder="Ej: 48" onChange={(coveredSquareMeters) => setForm({ ...form, coveredSquareMeters })} />
+              <TextField label="Ambientes" type="number" value={form.rooms} onChange={(rooms) => setForm({ ...form, rooms })} />
+              <TextField label="Dormitorios" type="number" value={form.bedrooms} onChange={(bedrooms) => setForm({ ...form, bedrooms })} />
+              <TextField label="Baños" type="number" value={form.bathrooms} onChange={(bathrooms) => setForm({ ...form, bathrooms })} />
+              <TextField label="Antigüedad" type="number" value={form.buildingAgeYears} onChange={(buildingAgeYears) => setForm({ ...form, buildingAgeYears })} />
+              <TextField label="Piso" type="number" value={form.floor} onChange={(floor) => setForm({ ...form, floor })} />
+              <SelectField label="Balcón" value={form.hasBalcony} onChange={(hasBalcony) => setForm({ ...form, hasBalcony })} />
+              <SelectField label="Amenities" value={form.hasAmenities} onChange={(hasAmenities) => setForm({ ...form, hasAmenities })} />
+              <SelectField label="Apto crédito" value={form.isCreditEligible} onChange={(isCreditEligible) => setForm({ ...form, isCreditEligible })} />
+              <label className="field">
+                <span>Estado</span>
+                <select value={form.propertyCondition} onChange={(event) => setForm({ ...form, propertyCondition: event.target.value as PropertyCondition })}>
+                  {(Object.keys(propertyConditionLabels) as PropertyCondition[]).map((condition) => (
+                    <option key={condition} value={condition}>
+                      {propertyConditionLabels[condition]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field field-wide">
+                <span>Descripción de la propiedad</span>
+                <textarea
+                  placeholder="Agregá detalles relevantes sobre la propiedad, estado, amenities, ubicación, etc."
+                  value={form.notes}
+                  onChange={(event) => setForm({ ...form, notes: event.target.value })}
+                />
+              </label>
+            </div>
+
+            <div className="wizard-form-actions">
+              <button
+                className={`primary-button ${submitting ? 'btn-loading' : ''}`}
+                type="submit"
+                disabled={submitting}
+                aria-busy={submitting ? 'true' : undefined}
+              >
+                {submitting && <span className="button-spinner" aria-hidden="true" />}
+                {submitting ? 'Cargando...' : 'Guardar y continuar →'}
+              </button>
+            </div>
+          </form>
+
+          <aside className="wizard-insights" aria-label="Ayuda para completar el análisis">
+            <WizardProgressCard percent={25} />
+            <WizardInfoCard icon="◌" title="Consejo" text="Cuanta más información completes, más preciso será nuestro análisis de riesgos y oportunidades." tone="warning" />
+            <WizardInfoCard icon="◇" title="¿Por qué analizamos?" text="Evaluamos oportunidades, riesgos legales, edilicios y financieros para que tomes mejores decisiones." />
+          </aside>
         </div>
-      </form>
+
+        <AnalysisScopeCard />
+
+        <div className="wizard-disclaimer">
+          <span aria-hidden="true">◇</span>
+          <p><strong>Recordá:</strong> PropSegura te da una segunda opinión experta. No reemplaza la revisión de un escribano o abogado.</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function WizardStep({
+  number,
+  title,
+  text,
+  state = 'pending'
+}: {
+  number: string;
+  title: string;
+  text: string;
+  state?: 'active' | 'current' | 'pending';
+}) {
+  return (
+    <div className={`wizard-step wizard-step-${state}`}>
+      <span>{number}</span>
+      <div>
+        <strong>{title}</strong>
+        <p>{text}</p>
+      </div>
+    </div>
+  );
+}
+
+function WizardProgressCard({ percent }: { percent: number }) {
+  return (
+    <article className="wizard-side-card wizard-progress-card">
+      <h3>Progreso del análisis</h3>
+      <div className="wizard-progress-body">
+        <div className="wizard-progress-ring" style={{ '--progress': `${percent}%` } as CSSProperties}>
+          <strong>{percent}%</strong>
+        </div>
+        <p>Completá los pasos para obtener el análisis completo de la propiedad.</p>
+      </div>
+      <div className="wizard-progress-list">
+        <span className="done">Información básica</span>
+        <span className="active">Precio y características</span>
+        <span>Documentación</span>
+        <span>Análisis y revisión</span>
+      </div>
+    </article>
+  );
+}
+
+function WizardInfoCard({
+  icon,
+  title,
+  text,
+  tone = 'success'
+}: {
+  icon: string;
+  title: string;
+  text: string;
+  tone?: 'success' | 'warning';
+}) {
+  return (
+    <article className={`wizard-side-card wizard-info-card wizard-info-${tone}`}>
+      <span aria-hidden="true">{icon}</span>
+      <div>
+        <h3>{title}</h3>
+        <p>{text}</p>
+      </div>
+    </article>
+  );
+}
+
+function AnalysisScopeCard() {
+  return (
+    <section className="wizard-analysis-card">
+      <h3>¿Qué analizamos en PropSegura?</h3>
+      <div>
+        <article>
+          <span aria-hidden="true">↗</span>
+          <strong>Oportunidad</strong>
+          <p>Evaluamos precio, zona y relación precio/m² para determinar la oportunidad.</p>
+        </article>
+        <article>
+          <span aria-hidden="true">⚖</span>
+          <strong>Riesgos legales</strong>
+          <p>Revisamos documentación, cláusulas y antecedentes legales de la propiedad.</p>
+        </article>
+        <article>
+          <span aria-hidden="true">▥</span>
+          <strong>Riesgos edilicios</strong>
+          <p>Analizamos estado del edificio, expensas, deudas y problemas estructurales.</p>
+        </article>
+        <article>
+          <span aria-hidden="true">$</span>
+          <strong>Riesgos financieros</strong>
+          <p>Evaluamos rentabilidad, costos ocultos y proyecciones de inversión.</p>
+        </article>
+      </div>
     </section>
   );
 }
@@ -1064,13 +1461,17 @@ function PropertyEditForm({
   onCancel,
   onSaved,
   onError,
-  setLoading
+  setLoading,
+  variant = 'default',
+  formId
 }: {
   analysis: PropertyAnalysis;
   onCancel: () => void;
   onSaved: (analysis: PropertyAnalysis) => void;
   onError: (message: string | null) => void;
   setLoading: (loading: boolean) => void;
+  variant?: 'default' | 'workspace';
+  formId?: string;
 }) {
   const [form, setForm] = useState<CreateFormState>(() => formStateFromAnalysis(analysis));
   const [saving, setSaving] = useState(false);
@@ -1110,6 +1511,64 @@ function PropertyEditForm({
       setSaving(false);
       setLoading(false);
     }
+  }
+
+  if (variant === 'workspace') {
+    return (
+      <form id={formId} className="edit-workspace-form" onSubmit={handleSubmit}>
+        <div className="edit-form-heading">
+          <h3>Información básica</h3>
+          <p>Datos principales de la propiedad.</p>
+        </div>
+        <div className="edit-field-grid">
+          <TextField label="Título de la propiedad" value={form.title} required onChange={(title) => setForm({ ...form, title })} />
+          <label className="field">
+            <span>Uso recomendado</span>
+            <select disabled value={analysis.recommendedUse} aria-label="Uso recomendado calculado">
+              <option>{recommendedUseLabel(analysis.recommendedUse)}</option>
+            </select>
+          </label>
+          <TextField label="Barrio" value={form.neighborhood} required onChange={(neighborhood) => setForm({ ...form, neighborhood })} />
+          <TextField label="Dirección" value={form.address} required onChange={(address) => setForm({ ...form, address })} />
+          <TextField label="Link de publicación" value={form.listingUrl} onChange={(listingUrl) => setForm({ ...form, listingUrl })} />
+          <TextField label="Precio de publicación" type="number" value={form.priceUsd} onChange={(priceUsd) => setForm({ ...form, priceUsd })} />
+          <TextField label="Expensas mensuales" type="number" value={form.monthlyExpenses} onChange={(monthlyExpenses) => setForm({ ...form, monthlyExpenses })} />
+          <TextField label="M² totales" type="number" value={form.totalSquareMeters} onChange={(totalSquareMeters) => setForm({ ...form, totalSquareMeters })} />
+          <TextField label="M² cubiertos" type="number" value={form.coveredSquareMeters} onChange={(coveredSquareMeters) => setForm({ ...form, coveredSquareMeters })} />
+          <TextField label="Ambientes" type="number" value={form.rooms} onChange={(rooms) => setForm({ ...form, rooms })} />
+          <TextField label="Dormitorios" type="number" value={form.bedrooms} onChange={(bedrooms) => setForm({ ...form, bedrooms })} />
+          <TextField label="Baños" type="number" value={form.bathrooms} onChange={(bathrooms) => setForm({ ...form, bathrooms })} />
+          <TextField label="Antigüedad" type="number" value={form.buildingAgeYears} onChange={(buildingAgeYears) => setForm({ ...form, buildingAgeYears })} />
+          <TextField label="Piso" type="number" value={form.floor} onChange={(floor) => setForm({ ...form, floor })} />
+          <SelectField label="Balcón" value={form.hasBalcony} onChange={(hasBalcony) => setForm({ ...form, hasBalcony })} />
+          <SelectField label="Amenities" value={form.hasAmenities} onChange={(hasAmenities) => setForm({ ...form, hasAmenities })} />
+          <SelectField label="Apto crédito" value={form.isCreditEligible} onChange={(isCreditEligible) => setForm({ ...form, isCreditEligible })} />
+          <label className="field">
+            <span>Estado</span>
+            <select value={form.propertyCondition} onChange={(event) => setForm({ ...form, propertyCondition: event.target.value as PropertyCondition })}>
+              {(Object.keys(propertyConditionLabels) as PropertyCondition[]).map((condition) => (
+                <option key={condition} value={condition}>
+                  {propertyConditionLabels[condition]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field field-wide">
+            <span>Descripción</span>
+            <textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
+          </label>
+        </div>
+        <div className="edit-inline-actions">
+          <button className="ghost-button" type="button" onClick={onCancel}>
+            Cancelar
+          </button>
+          <button className={`primary-button ${saving ? 'btn-loading' : ''}`} type="submit" disabled={saving} aria-busy={saving ? 'true' : undefined}>
+            {saving && <span className="button-spinner" aria-hidden="true" />}
+            {saving ? 'Cargando...' : 'Guardar cambios'}
+          </button>
+        </div>
+      </form>
+    );
   }
 
   return (
@@ -1179,153 +1638,305 @@ function AnalysisDetail({
   onAnalysisUpdated: (analysis: PropertyAnalysis) => void;
 }) {
   const checklistStats = getChecklistStats(analysis.checklistItems);
-  const [isEditingProperty, setIsEditingProperty] = useState(false);
+  const detailOpinion = getAnalysisOpinion(analysis, checklistStats);
+  const progressPercent = getAnalysisProgressPercent(analysis, checklistStats);
+  const workspaceFormId = `property-edit-${analysis.id}`;
+  const [uploadingCover, setUploadingCover] = useState(false);
 
   function scrollToDocuments() {
     document.getElementById('documents-workspace')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  function scrollToFindings() {
+    document.getElementById('findings-workspace')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function scrollToReport() {
+    document.getElementById('report-workspace')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  async function handleCoverImageChange(file: File | null) {
+    if (!file) {
+      return;
+    }
+
+    if (!isValidCoverImageFile(file)) {
+      onError('La imagen principal debe ser JPEG, PNG o WEBP y pesar hasta 5 MB.');
+      return;
+    }
+
+    setUploadingCover(true);
+    setLoading(true);
+    onError(null);
+
+    try {
+      const updated = await uploadCoverImage(analysis.id, file);
+      onAnalysisUpdated(updated);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'No se pudo actualizar la imagen principal.');
+    } finally {
+      setUploadingCover(false);
+      setLoading(false);
+    }
+  }
+
   return (
-    <div className="analysis-page property-workspace">
-      <section className="panel workspace-hero">
-        <div className="workspace-heading">
+    <div className="property-edit-page">
+      <aside className="property-edit-sidebar">
+        <button className="sidebar-back" type="button" onClick={() => window.history.back()}>
+          ← Volver a mis oportunidades
+        </button>
+        <div className="sidebar-property-photo-wrap">
+          <PropertyCoverImage className="sidebar-property-photo" coverImageUrl={analysis.coverImageUrl} alt={`Imagen de ${analysis.title}`} />
+          <label className={`change-cover-button ${uploadingCover ? 'btn-loading' : ''}`}>
+            {uploadingCover && <span className="button-spinner" aria-hidden="true" />}
+            {uploadingCover ? 'Cargando...' : 'Cambiar imagen'}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              disabled={uploadingCover}
+              onChange={(event) => void handleCoverImageChange(event.target.files?.[0] ?? null)}
+            />
+          </label>
+        </div>
+        <Badge tone="success">En análisis</Badge>
+        <div className="sidebar-property-summary">
+          <h2>{analysis.title}</h2>
+          <p>{analysis.neighborhood || 'Sin barrio'}, CABA</p>
+          <strong>{formatMoney(analysis.priceUsd)} · {formatNumber(analysis.totalSquareMeters)} m²</strong>
+        </div>
+        <div className="sidebar-progress-list">
+          <WorkspaceStep title="Información básica" text="Completado" state="done" />
+          <WorkspaceStep title="Precio y características" text="Completado" state="done" />
+          <WorkspaceStep title="Documentación" text={checklistStats.percent >= 100 ? 'Completado' : 'En progreso'} state="active" number="3" />
+          <WorkspaceStep title="Análisis y hallazgos" text={analysis.documentFindings.length > 0 ? 'En progreso' : 'Pendiente'} number="4" />
+          <WorkspaceStep title="Informe final" text="Pendiente" number="5" />
+        </div>
+        <div className="wizard-help-card edit-sidebar-help">
+          <span className="wizard-help-icon" aria-hidden="true">◇</span>
+          <strong>¿Necesitás ayuda?</strong>
+          <p>Nuestro equipo está para ayudarte en cada paso.</p>
+          <button className="ghost-button" type="button">Contactar soporte</button>
+        </div>
+      </aside>
+
+      <main className="property-edit-main">
+        <div className="property-edit-titlebar">
           <div>
-            <p className="eyebrow">Propiedad</p>
-            <h2>{analysis.title}</h2>
-            <p className="section-copy">{analysis.address} - {analysis.neighborhood || 'Sin barrio'}</p>
-          </div>
-          <div className="workspace-actions">
-            <button className="secondary-button" type="button" onClick={() => setIsEditingProperty((current) => !current)}>
-              Editar propiedad
+            <button className="wizard-back" type="button" onClick={() => window.history.back()}>
+              ← Volver
             </button>
+            <h1>{analysis.title}</h1>
+            <div className="property-meta-row">
+              <span>{analysis.neighborhood || 'Sin barrio'}, CABA</span>
+              <span>{propertyConditionLabels[analysis.propertyCondition]}</span>
+              <span>{formatNumber(analysis.totalSquareMeters)} m²</span>
+              <span>Creada el {formatDate(analysis.createdAtUtc)}</span>
+            </div>
+          </div>
+          <div className="property-edit-actions">
             <button className="secondary-button" type="button" onClick={scrollToDocuments}>
-              Subir documento
+              Más acciones
             </button>
-            <button className="ghost-button" type="button" onClick={scrollToDocuments}>
-              Analizar documento
+            <button className="secondary-button" type="submit" form={workspaceFormId}>
+              Guardar cambios
             </button>
-            <button className="ghost-button" type="button" disabled title="Próximamente">
-              Generar informe
-            </button>
-            <button
-              className={`ghost-button ${loading ? 'btn-loading' : ''}`}
-              type="button"
-              onClick={onRefresh}
-              disabled={loading}
-              aria-busy={loading ? 'true' : undefined}
-            >
+            <button className={`primary-button ${loading ? 'btn-loading' : ''}`} type="button" onClick={onRefresh} disabled={loading} aria-busy={loading ? 'true' : undefined}>
               {loading && <span className="button-spinner" aria-hidden="true" />}
-              {loading ? 'Cargando...' : 'Actualizar'}
+              {loading ? 'Cargando...' : 'Analizar propiedad'}
             </button>
           </div>
         </div>
 
-        <div className="workspace-summary-grid">
-          <Info label="Precio" value={formatMoney(analysis.priceUsd)} />
-          <Info label="m²" value={formatNumber(analysis.totalSquareMeters)} />
-          <Info label="USD/m²" value={formatMoney(analysis.usdPerSquareMeter)} />
-          <Info label="Barrio" value={analysis.neighborhood || 'Sin dato'} />
+        <section className="edit-kpi-grid">
+          <EditKpiCard title="Oportunidad" value={analysis.opportunityScore} label={scoreBadgeLabel('opportunity', analysis.opportunityScore)} text={analysis.benchmarkComparison || 'Comparación pendiente'} tone="success" icon="↗" />
+          <EditKpiCard title="Protección" value={analysis.protectionScore} label={scoreBadgeLabel('protection', analysis.protectionScore)} text="Riesgos documentales detectados" tone="warning" icon="◇" />
+          <EditKpiCard title="Negociación estimada" value={formatMoney(analysis.negotiationAnalysis?.suggestedTargetPriceUsd ?? analysis.suggestedTargetPriceUsd)} label="Rango sugerido" text="Basado en oportunidad y riesgos identificados" tone="info" />
+          <EditOpinionCard opinion={detailOpinion} updatedAt={analysis.updatedAtUtc} />
+        </section>
+
+        <nav className="edit-tabs" aria-label="Secciones de la propiedad">
+          <button className="active" type="button">⌂ General</button>
+          <button type="button">◇ Precio y características</button>
+          <button type="button" onClick={scrollToDocuments}>▤ Documentos</button>
+          <button type="button" onClick={scrollToFindings}>◌ Hallazgos</button>
+          <button type="button" onClick={scrollToReport}>▧ Informe</button>
+        </nav>
+
+        <div className="property-edit-content-grid">
+          <div>
+            <section className="edit-form-card">
+              <PropertyEditForm
+                analysis={analysis}
+                variant="workspace"
+                formId={workspaceFormId}
+                onCancel={() => undefined}
+                onSaved={onAnalysisUpdated}
+                onError={onError}
+                setLoading={setLoading}
+              />
+            </section>
+
+            <AnalysisScopeCard />
+          </div>
+
+          <aside className="edit-right-rail">
+            <WorkspaceProgressCard percent={progressPercent} checklistStats={checklistStats} />
+            <WizardInfoCard icon="◌" title="Consejo" text="Cuanta más información y documentos subas, más preciso será nuestro análisis y recomendaciones." tone="warning" />
+            <WizardInfoCard icon="◇" title="¿Por qué analizamos?" text="Evaluamos oportunidades, riesgos legales, edilicios y financieros para que compres más seguro." />
+          </aside>
         </div>
 
-        {isEditingProperty && (
-          <PropertyEditForm
-            analysis={analysis}
-            onCancel={() => setIsEditingProperty(false)}
-            onSaved={(updated) => {
-              setIsEditingProperty(false);
-              onAnalysisUpdated(updated);
-            }}
-            onError={onError}
-            setLoading={setLoading}
-          />
-        )}
-      </section>
-
-      <section className="workspace-grid">
-        <article className="panel score-workspace-card opportunity-section">
+        <section className="panel negotiation-card edit-continuation-card">
           <div className="section-heading compact-heading">
             <div>
-              <p className="eyebrow">Evaluación inicial</p>
-              <h3>¿Vale la pena avanzar?</h3>
+              <p className="eyebrow">Negociación</p>
+              <h3>Rango de negociación</h3>
             </div>
-            <Badge tone={riskTone(analysis.initialRiskLevel)}>{riskLevelLabel(analysis.initialRiskLevel)}</Badge>
+            <Badge tone={marketPositionTone(analysis.marketPosition)}>{marketPositionLabel(analysis.marketPosition)}</Badge>
           </div>
-          <ScoreMeter score={analysis.opportunityScore} variant="opportunity" label="Oportunidad" />
-          <div className="badge-row">
-            <Badge tone={recommendedTone(analysis.recommendedUse)}>{recommendedUseLabel(analysis.recommendedUse)}</Badge>
-            <Badge tone="neutral">{analysis.benchmarkComparison}</Badge>
+          <div className="negotiation-grid">
+            <Info label="Precio publicado" value={formatMoney(analysis.negotiationAnalysis?.publishedPriceUsd ?? analysis.priceUsd)} />
+            <Info label="USD/m²" value={formatMoney(analysis.negotiationAnalysis?.usdPerSquareMeter ?? analysis.usdPerSquareMeter)} />
+            <Info label="Promedio zona" value={formatMoney(analysis.negotiationAnalysis?.benchmarkUsdPerSquareMeter)} />
+            <Info label="Valor estimado" value={formatRange(analysis.negotiationAnalysis?.estimatedFairValueMinUsd, analysis.negotiationAnalysis?.estimatedFairValueMaxUsd)} />
+            <Info label="Oferta inicial sugerida" value={formatMoney(analysis.negotiationAnalysis?.suggestedFirstOfferUsd ?? analysis.suggestedFirstOfferUsd)} />
+            <Info label="Precio objetivo" value={formatMoney(analysis.negotiationAnalysis?.suggestedTargetPriceUsd ?? analysis.suggestedTargetPriceUsd)} />
+            <Info label="Margen de negociación" value={formatPercent(analysis.negotiationAnalysis?.negotiationMarginPercent ?? analysis.negotiationMarginPercent)} />
           </div>
-          <p className="score-summary">{opportunitySummary(analysis)}</p>
-        </article>
+          <p className="score-summary">{analysis.negotiationAnalysis?.explanation ?? analysis.negotiationExplanation}</p>
+        </section>
 
-        <article className="panel score-workspace-card protection-section">
+        <section className="panel document-workspace edit-continuation-card" id="documents-workspace">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Documentos</p>
+              <h3>Validación documental</h3>
+              <p className="section-copy">Completá el checklist, subí documentos y analizalos cuando estés listo para validar la propiedad.</p>
+            </div>
+          </div>
+          <div className="document-layout">
+            <div>
+              <h4>Checklist</h4>
+              <Checklist items={analysis.checklistItems} />
+            </div>
+            <div>
+              <h4>Subir documento</h4>
+              <AddDocumentForm analysisId={analysis.id} onRefresh={onRefresh} onError={onError} setLoading={setLoading} />
+            </div>
+          </div>
+          <div className="workspace-subsection">
+            <h4>Documentos cargados</h4>
+            <DocumentsList analysisId={analysis.id} documents={analysis.documents} findings={analysis.documentFindings} onRefresh={onRefresh} onError={onError} setLoading={setLoading} />
+          </div>
+        </section>
+
+        <section className="panel edit-continuation-card" id="findings-workspace">
           <div className="section-heading compact-heading">
             <div>
-              <p className="eyebrow">Validación documental</p>
-              <h3>¿Estoy protegido?</h3>
+              <p className="eyebrow">Hallazgos</p>
+              <h3>Señales agrupadas por severidad</h3>
             </div>
-            <Badge tone={protectionTone(analysis.protectionScore)}>{protectionLabel(analysis.protectionScore)}</Badge>
           </div>
-          <ScoreMeter score={analysis.protectionScore} variant="protection" label="Protección" />
-          <ChecklistProgress stats={checklistStats} />
-          <MissingDocuments items={analysis.checklistItems} />
-        </article>
-      </section>
+          <GroupedFindings riskFindings={analysis.riskFindings} documentFindings={analysis.documentFindings} />
+        </section>
 
-      <section className="panel negotiation-card">
-        <div className="section-heading compact-heading">
-          <div>
-            <p className="eyebrow">Negociación</p>
-            <h3>Rango de negociación</h3>
-          </div>
-          <Badge tone={marketPositionTone(analysis.marketPosition)}>{marketPositionLabel(analysis.marketPosition)}</Badge>
-        </div>
-        <div className="negotiation-grid">
-          <Info label="Precio publicado" value={formatMoney(analysis.negotiationAnalysis?.publishedPriceUsd ?? analysis.priceUsd)} />
-          <Info label="USD/m²" value={formatMoney(analysis.negotiationAnalysis?.usdPerSquareMeter ?? analysis.usdPerSquareMeter)} />
-          <Info label="Promedio zona" value={formatMoney(analysis.negotiationAnalysis?.benchmarkUsdPerSquareMeter)} />
-          <Info label="Valor estimado" value={formatRange(analysis.negotiationAnalysis?.estimatedFairValueMinUsd, analysis.negotiationAnalysis?.estimatedFairValueMaxUsd)} />
-          <Info label="Oferta inicial sugerida" value={formatMoney(analysis.negotiationAnalysis?.suggestedFirstOfferUsd ?? analysis.suggestedFirstOfferUsd)} />
-          <Info label="Precio objetivo" value={formatMoney(analysis.negotiationAnalysis?.suggestedTargetPriceUsd ?? analysis.suggestedTargetPriceUsd)} />
-          <Info label="Margen de negociación" value={formatPercent(analysis.negotiationAnalysis?.negotiationMarginPercent ?? analysis.negotiationMarginPercent)} />
-        </div>
-        <p className="score-summary">{analysis.negotiationAnalysis?.explanation ?? analysis.negotiationExplanation}</p>
-      </section>
-
-      <section className="panel document-workspace" id="documents-workspace">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Documentos</p>
-            <h3>Validación documental</h3>
-            <p className="section-copy">Completá el checklist, subí documentos y analizalos cuando estés listo para validar la propiedad.</p>
-          </div>
-        </div>
-        <div className="document-layout">
-          <div>
-            <h4>Checklist</h4>
-            <Checklist items={analysis.checklistItems} />
-          </div>
-          <div>
-            <h4>Subir documento</h4>
-            <AddDocumentForm analysisId={analysis.id} onRefresh={onRefresh} onError={onError} setLoading={setLoading} />
-          </div>
-        </div>
-        <div className="workspace-subsection">
-          <h4>Documentos cargados</h4>
-          <DocumentsList analysisId={analysis.id} documents={analysis.documents} findings={analysis.documentFindings} onRefresh={onRefresh} onError={onError} setLoading={setLoading} />
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="section-heading compact-heading">
-          <div>
-            <p className="eyebrow">Hallazgos</p>
-            <h3>Señales agrupadas por severidad</h3>
-          </div>
-        </div>
-        <GroupedFindings riskFindings={analysis.riskFindings} documentFindings={analysis.documentFindings} />
-      </section>
+        <section className="wizard-disclaimer edit-report-note" id="report-workspace">
+          <span aria-hidden="true">◇</span>
+          <p><strong>Informe final:</strong> próximamente vas a poder generar un resumen exportable. Por ahora, usá esta pantalla para completar datos, documentos y hallazgos.</p>
+        </section>
+      </main>
     </div>
+  );
+}
+
+function WorkspaceStep({
+  title,
+  text,
+  state = 'pending',
+  number
+}: {
+  title: string;
+  text: string;
+  state?: 'done' | 'active' | 'pending';
+  number?: string;
+}) {
+  return (
+    <div className={`workspace-step workspace-step-${state}`}>
+      <span>{state === 'done' ? '✓' : number}</span>
+      <div>
+        <strong>{title}</strong>
+        <p>{text}</p>
+      </div>
+    </div>
+  );
+}
+
+function EditKpiCard({
+  title,
+  value,
+  label,
+  text,
+  tone,
+  icon
+}: {
+  title: string;
+  value: number | string;
+  label: string;
+  text: string;
+  tone: 'success' | 'warning' | 'info';
+  icon?: string;
+}) {
+  return (
+    <article className={`edit-kpi-card edit-kpi-${tone}`}>
+      <div>
+        <h3>{title}</h3>
+        <div className="edit-kpi-value">
+          <strong>{value}</strong>
+          <span>{label}</span>
+        </div>
+        <p>{text}</p>
+      </div>
+      {icon && <span aria-hidden="true">{icon}</span>}
+    </article>
+  );
+}
+
+function EditOpinionCard({
+  opinion,
+  updatedAt
+}: {
+  opinion: { label: string; tone: string };
+  updatedAt: string;
+}) {
+  return (
+    <article className="edit-kpi-card edit-opinion-card">
+      <h3>Mi opinión</h3>
+      <Badge tone={opinion.tone}>{opinion.label}</Badge>
+      <p>Última actualización:<br />{formatDate(updatedAt)}</p>
+      <button className="ghost-button" type="button" aria-label="Editar opinión">✎</button>
+    </article>
+  );
+}
+
+function WorkspaceProgressCard({ percent, checklistStats }: { percent: number; checklistStats: ChecklistStats }) {
+  return (
+    <article className="wizard-side-card wizard-progress-card">
+      <h3>Progreso del análisis</h3>
+      <div className="wizard-progress-body">
+        <div className="wizard-progress-ring" style={{ '--progress': `${percent}%` } as CSSProperties}>
+          <strong>{percent}%</strong>
+        </div>
+        <p>Completá los pasos para obtener el análisis completo de la propiedad.</p>
+      </div>
+      <div className="wizard-progress-list">
+        <span className="done">Información básica</span>
+        <span className="done">Precio y características</span>
+        <span className={checklistStats.percent >= 100 ? 'done' : 'active'}>Documentación</span>
+        <span>Análisis y hallazgos</span>
+        <span>Informe final</span>
+      </div>
+    </article>
   );
 }
 
@@ -1565,8 +2176,11 @@ function GroupedFindings({
       category: finding.type,
       title: finding.title,
       description: finding.description,
+      buyerImpact: null,
       suggestedQuestion: null,
-      suggestedChange: null
+      suggestedChange: null,
+      suggestedNegotiationPoint: null,
+      matchedText: null
     })),
     ...documentFindings.map((finding) => ({
       id: finding.id,
@@ -1574,8 +2188,11 @@ function GroupedFindings({
       category: finding.category,
       title: finding.title,
       description: finding.description,
+      buyerImpact: finding.buyerImpact,
       suggestedQuestion: finding.suggestedQuestion,
-      suggestedChange: finding.suggestedChange
+      suggestedChange: finding.suggestedChange,
+      suggestedNegotiationPoint: finding.suggestedNegotiationPoint,
+      matchedText: finding.matchedText
     }))
   ];
 
@@ -1611,8 +2228,12 @@ function GroupedFindings({
                   <div>
                     <strong>{finding.title}</strong>
                     <p>{finding.description}</p>
+                    {finding.buyerImpact && <p><strong>Impacto para comprador:</strong> {finding.buyerImpact}</p>}
+                    {finding.matchedText && <p><strong>Texto detectado:</strong> {finding.matchedText}</p>}
                     {finding.suggestedQuestion && <p><strong>Pregunta sugerida:</strong> {finding.suggestedQuestion}</p>}
-                    {finding.suggestedChange && <p><strong>Cambio sugerido:</strong> {finding.suggestedChange}</p>}
+                    {(finding.suggestedNegotiationPoint ?? finding.suggestedChange) && (
+                      <p><strong>Punto para negociar:</strong> {finding.suggestedNegotiationPoint ?? finding.suggestedChange}</p>
+                    )}
                   </div>
                   <Badge tone={findingTone(finding.severity)}>{findingCategoryLabel(finding.category)}</Badge>
                 </div>
@@ -1644,6 +2265,9 @@ function DocumentCard({
   const [isEditingText, setIsEditingText] = useState(false);
   const [savingText, setSavingText] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const suggestedQuestions = uniqueStrings(findings.map((finding) => finding.suggestedQuestion));
+  const suggestedNegotiationPoints = uniqueStrings(findings.map((finding) => finding.suggestedNegotiationPoint ?? finding.suggestedChange));
+  const documentRisk = documentRiskLevel(findings);
 
   useEffect(() => {
     setText(document.editedText ?? document.extractedText ?? '');
@@ -1673,7 +2297,6 @@ function DocumentCard({
 
     try {
       await analyzeDocument(analysisId, document.id, { extractedText: nullableText(text) });
-      setText('');
       await onRefresh();
     } catch (err) {
       onError(err instanceof Error ? err.message : 'No se pudo analizar el documento.');
@@ -1687,20 +2310,27 @@ function DocumentCard({
     <article className="document-card">
       <div className="document-header">
         <div>
-          <strong>{document.fileName}</strong>
-          <p>{documentTypeLabels[document.documentType]} - {document.contentType} - {document.sizeBytes} bytes</p>
+          <strong>{documentIntelligenceTitle(document.documentType)}</strong>
+          <p>{documentTypeLabels[document.documentType]} - {document.fileName} - {document.sizeBytes} bytes</p>
         </div>
         <div className="document-status">
           <Badge tone={document.hasExtractedText ? 'success' : 'warning'}>
             {document.hasExtractedText ? 'Texto extraído' : 'Sin texto extraído'}
           </Badge>
-          <Badge tone="neutral">{document.analysisStatus}</Badge>
+          <Badge tone={textExtractionQualityTone(document.textExtractionQuality)}>{textExtractionQualityLabel(document.textExtractionQuality)}</Badge>
+          <Badge tone={findingTone(documentRisk)}>{findingSeverityLabel(documentRisk)}</Badge>
+          <Badge tone="neutral">{documentAnalysisStatusLabel(document.analysisStatus)}</Badge>
         </div>
       </div>
       {document.analysisSummary && <p className="summary-note">{document.analysisSummary}</p>}
+      {shouldShowOcrWarning(document) && (
+        <div className="ocr-warning">
+          El PDF parece escaneado. PropSegura intentó leerlo con OCR. Revisá el texto antes de analizar.
+        </div>
+      )}
       <div className="text-workflow">
         <div className="text-workflow-header">
-          <strong>Texto extraído</strong>
+          <strong>Texto del documento</strong>
           <Badge tone={textExtractionTone(document.textExtractionStatus)}>{textExtractionLabel(document.textExtractionStatus)}</Badge>
         </div>
         {document.editedText || document.extractedText ? (
@@ -1713,14 +2343,14 @@ function DocumentCard({
         )}
         <div className="document-actions">
           <button className="ghost-button" type="button" onClick={() => setIsEditingText((current) => !current)}>
-            {isEditingText ? 'Ocultar edición' : 'Editar texto extraído'}
+            {isEditingText ? 'Ocultar texto' : 'Revisar texto'}
           </button>
         </div>
         {isEditingText && (
           <div className="text-editor">
             <textarea
               className="analysis-text"
-              placeholder="Corregí o pegá el texto de la reserva antes de analizar"
+              placeholder="Corregí o pegá el texto del documento antes de analizar"
               value={text}
               onChange={(event) => setText(event.target.value)}
             />
@@ -1748,15 +2378,73 @@ function DocumentCard({
         {submitting ? 'Analizando...' : document.documentType === 'ReservationAgreement' ? 'Analizar reserva' : 'Analizar documento'}
       </button>
       {findings.length > 0 && (
-        <div className="mini-findings">
-          {findings.map((finding) => (
-            <Badge tone={findingTone(finding.severity)} key={finding.id}>
-              {findingSeverityLabel(finding.severity)} - {findingCategoryLabel(finding.category)}
-            </Badge>
-          ))}
+        <div className="document-intelligence-results">
+          <DocumentFindingsBySeverity findings={findings} />
+          {suggestedQuestions.length > 0 && (
+            <InsightList title="Preguntas sugeridas" items={suggestedQuestions} />
+          )}
+          {suggestedNegotiationPoints.length > 0 && (
+            <InsightList title="Puntos para negociar" items={suggestedNegotiationPoints} />
+          )}
         </div>
       )}
+      <p className="document-disclaimer">Esto no reemplaza la revisión de un escribano o abogado. PropSegura te ayuda a detectar señales de alerta y preparar mejores preguntas.</p>
     </article>
+  );
+}
+
+function DocumentFindingsBySeverity({ findings }: { findings: DocumentFinding[] }) {
+  const severities = ['Critical', 'High', 'Medium', 'Low', 'Info'];
+
+  return (
+    <div className="document-finding-groups">
+      {severities.map((severity) => {
+        const items = findings.filter((finding) => finding.severity === severity);
+
+        if (items.length === 0) {
+          return null;
+        }
+
+        return (
+          <section className="document-finding-group" key={severity}>
+            <div className="finding-group-heading">
+              <Badge tone={findingTone(severity)}>{findingSeverityLabel(severity)}</Badge>
+              <span>{items.length} señal(es)</span>
+            </div>
+            <div className="finding-list">
+              {items.map((finding) => (
+                <div className={`finding-card finding-${findingTone(finding.severity)}`} key={finding.id}>
+                  <div>
+                    <strong>{finding.title}</strong>
+                    <p>{finding.description}</p>
+                    {finding.buyerImpact && <p><strong>Impacto para comprador:</strong> {finding.buyerImpact}</p>}
+                    {finding.matchedText && <p><strong>Texto detectado:</strong> {finding.matchedText}</p>}
+                    {finding.suggestedQuestion && <p><strong>Pregunta sugerida:</strong> {finding.suggestedQuestion}</p>}
+                    {(finding.suggestedNegotiationPoint ?? finding.suggestedChange) && (
+                      <p><strong>Punto para negociar:</strong> {finding.suggestedNegotiationPoint ?? finding.suggestedChange}</p>
+                    )}
+                  </div>
+                  <Badge tone={findingTone(finding.severity)}>{findingCategoryLabel(finding.category)}</Badge>
+                </div>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function InsightList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="insight-list">
+      <strong>{title}</strong>
+      <ul>
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -1794,8 +2482,11 @@ function FindingsList({
           <div>
             <strong>{finding.title}</strong>
             <p>{finding.description}</p>
+            {finding.buyerImpact && <p><strong>Impacto para comprador:</strong> {finding.buyerImpact}</p>}
             {finding.suggestedQuestion && <p><strong>Pregunta sugerida:</strong> {finding.suggestedQuestion}</p>}
-            {finding.suggestedChange && <p><strong>Cambio sugerido:</strong> {finding.suggestedChange}</p>}
+            {(finding.suggestedNegotiationPoint ?? finding.suggestedChange) && (
+              <p><strong>Punto para negociar:</strong> {finding.suggestedNegotiationPoint ?? finding.suggestedChange}</p>
+            )}
           </div>
           <Badge tone={findingTone(finding.severity)}>{findingSeverityLabel(finding.severity)} - {findingCategoryLabel(finding.category)}</Badge>
         </div>
@@ -1908,6 +2599,81 @@ function textExtractionLabel(status: string) {
   return labels[status] ?? status;
 }
 
+function textExtractionQualityTone(quality: string) {
+  if (quality === 'Good') {
+    return 'success';
+  }
+  if (quality === 'Partial' || quality === 'Poor') {
+    return 'warning';
+  }
+  if (quality === 'Empty') {
+    return 'danger';
+  }
+  return 'neutral';
+}
+
+function textExtractionQualityLabel(quality: string) {
+  const labels: Record<string, string> = {
+    Unknown: 'Sin dato',
+    Good: 'Buena',
+    Partial: 'Parcial',
+    Poor: 'Pobre',
+    Empty: 'Vacía'
+  };
+
+  return labels[quality] ?? quality;
+}
+
+function shouldShowOcrWarning(document: PropertyDocument) {
+  return document.analysisSummary?.toLowerCase().includes('ocr') === true ||
+    document.textExtractionQuality === 'Poor' ||
+    document.textExtractionQuality === 'Empty';
+}
+
+function documentAnalysisStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    NotStarted: 'Sin analizar',
+    Pending: 'Pendiente',
+    Completed: 'Analizado',
+    Failed: 'Falló'
+  };
+
+  return labels[status] ?? status;
+}
+
+function documentIntelligenceTitle(documentType: DocumentType) {
+  if (documentType === 'ReservationAgreement') {
+    return 'Análisis de reserva';
+  }
+
+  if (documentType === 'Expenses') {
+    return 'Análisis de expensas';
+  }
+
+  return 'Análisis documental';
+}
+
+function documentRiskLevel(findings: DocumentFinding[]) {
+  if (findings.some((finding) => finding.severity === 'Critical')) {
+    return 'Critical';
+  }
+  if (findings.some((finding) => finding.severity === 'High')) {
+    return 'High';
+  }
+  if (findings.some((finding) => finding.severity === 'Medium')) {
+    return 'Medium';
+  }
+  if (findings.some((finding) => finding.severity === 'Low')) {
+    return 'Low';
+  }
+
+  return 'Info';
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.filter((value): value is string => Boolean(value?.trim()))));
+}
+
 function riskTone(level: string) {
   return level === 'Low' ? 'success' : level === 'Medium' ? 'warning' : 'danger';
 }
@@ -1965,18 +2731,20 @@ function TextField({
   value,
   onChange,
   type = 'text',
-  required = false
+  required = false,
+  placeholder
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
   required?: boolean;
+  placeholder?: string;
 }) {
   return (
     <label className="field">
       <span>{label}</span>
-      <input type={type} value={value} required={required} onChange={(event) => onChange(event.target.value)} />
+      <input type={type} value={value} required={required} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }
@@ -2068,6 +2836,128 @@ function valueOrMax(value?: number | null) {
   return value == null ? Number.MAX_SAFE_INTEGER : value;
 }
 
+function matchesDashboardSearch(analysis: PropertyAnalysisSummary, searchTerm: string) {
+  const normalizedSearch = searchTerm.trim().toLocaleLowerCase('es-AR');
+
+  if (!normalizedSearch) {
+    return true;
+  }
+
+  return [
+    analysis.title,
+    analysis.address,
+    analysis.neighborhood,
+    recommendedUseLabel(analysis.recommendedUse),
+    riskLevelLabel(analysis.initialRiskLevel)
+  ]
+    .filter(Boolean)
+    .some((value) => value.toLocaleLowerCase('es-AR').includes(normalizedSearch));
+}
+
+function getDashboardStats(analyses: PropertyAnalysisSummary[]) {
+  const total = analyses.length;
+  const recommended = analyses.filter((analysis) => ['Living', 'Investment', 'Both'].includes(analysis.recommendedUse) && analysis.opportunityScore >= 70).length;
+  const highRisk = analyses.filter((analysis) => analysis.initialRiskLevel === 'High' || analysis.criticalFindingsCount > 0 || analysis.opportunityScore < 50).length;
+  const needsAttention = analyses.filter((analysis) => analysis.missingRequiredDocumentsCount > 0 || analysis.criticalFindingsCount > 0 || analysis.protectionScore < 50).length;
+  const averageOpportunity = total === 0
+    ? 0
+    : Math.round(analyses.reduce((sum, analysis) => sum + analysis.opportunityScore, 0) / total);
+
+  return {
+    averageOpportunity,
+    highRisk,
+    needsAttention,
+    recommended,
+    total
+  };
+}
+
+function getFeaturedAnalyses(analyses: PropertyAnalysisSummary[]) {
+  const byOpportunity = [...analyses].sort((left, right) => right.opportunityScore - left.opportunityScore);
+  const investmentCandidates = analyses.filter((analysis) => analysis.recommendedUse === 'Investment' || analysis.recommendedUse === 'Both');
+  const attentionCandidates = analyses.filter((analysis) => analysis.missingRequiredDocumentsCount > 0 || analysis.criticalFindingsCount > 0 || analysis.protectionScore < 50 || analysis.initialRiskLevel === 'High');
+
+  return {
+    bestInvestment: [...(investmentCandidates.length > 0 ? investmentCandidates : analyses)].sort((left, right) => right.opportunityScore - left.opportunityScore)[0],
+    bestOpportunity: byOpportunity[0],
+    needsAttention: [...(attentionCandidates.length > 0 ? attentionCandidates : analyses)].sort((left, right) =>
+      right.criticalFindingsCount - left.criticalFindingsCount ||
+      left.protectionScore - right.protectionScore ||
+      right.missingRequiredDocumentsCount - left.missingRequiredDocumentsCount
+    )[0]
+  };
+}
+
+function scoreClassName(type: 'opportunity' | 'protection', score: number) {
+  if (type === 'protection') {
+    if (score >= 80) {
+      return 'score-strong';
+    }
+    if (score >= 50) {
+      return 'score-medium';
+    }
+    return 'score-low';
+  }
+
+  if (score >= 90) {
+    return 'score-excellent';
+  }
+  if (score >= 70) {
+    return 'score-strong';
+  }
+  if (score >= 50) {
+    return 'score-medium';
+  }
+  return 'score-low';
+}
+
+function scoreBadgeLabel(type: 'opportunity' | 'protection', score: number) {
+  if (type === 'protection') {
+    if (score >= 80) {
+      return 'Alta';
+    }
+    if (score >= 50) {
+      return 'Media';
+    }
+    return 'Baja';
+  }
+
+  if (score >= 90) {
+    return 'Excelente';
+  }
+  if (score >= 70) {
+    return 'Muy buena';
+  }
+  if (score >= 50) {
+    return 'Buena';
+  }
+  return 'Baja';
+}
+
+function getDashboardOpinion(analysis: PropertyAnalysisSummary) {
+  if (analysis.recommendedUse === 'NotRecommended' || analysis.opportunityScore < 45 || analysis.criticalFindingsCount > 0) {
+    return {
+      icon: '●',
+      label: 'No la compraría',
+      tone: 'danger'
+    };
+  }
+
+  if (analysis.protectionScore < 55 || analysis.missingRequiredDocumentsCount > 0 || analysis.findingsCount > 0) {
+    return {
+      icon: '●',
+      label: 'Esperaría documentación',
+      tone: 'warning'
+    };
+  }
+
+  return {
+    icon: '●',
+    label: 'Seguiría avanzando',
+    tone: 'success'
+  };
+}
+
 function compareText(left?: string | null, right?: string | null) {
   return (left || '').localeCompare(right || '', 'es-AR', { sensitivity: 'base' });
 }
@@ -2107,6 +2997,45 @@ function getPropertyIdFromPath(path: string) {
   }
 
   return match[1];
+}
+
+function isValidCoverImageFile(file: File) {
+  return ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) && file.size <= 5 * 1024 * 1024;
+}
+
+function getAnalysisProgressPercent(analysis: PropertyAnalysis, checklistStats: ChecklistStats) {
+  let completed = 2;
+
+  if (checklistStats.percent >= 100) {
+    completed += 1;
+  }
+
+  if (analysis.documentFindings.length > 0 || analysis.riskFindings.length > 0) {
+    completed += 1;
+  }
+
+  return Math.round((completed / 5) * 100);
+}
+
+function getAnalysisOpinion(analysis: PropertyAnalysis, checklistStats: ChecklistStats) {
+  if (analysis.recommendedUse === 'NotRecommended' || analysis.opportunityScore < 45 || analysis.riskFindings.some((finding) => finding.severity === 'Critical')) {
+    return {
+      label: 'No la compraría',
+      tone: 'danger'
+    };
+  }
+
+  if (analysis.protectionScore < 55 || checklistStats.percent < 100 || analysis.documentFindings.length > 0) {
+    return {
+      label: 'Esperaría documentación',
+      tone: 'warning'
+    };
+  }
+
+  return {
+    label: 'Seguiría avanzando',
+    tone: 'success'
+  };
 }
 
 function formatMoney(value?: number | null) {
@@ -2169,3 +3098,4 @@ function protectionLabel(score: number) {
   }
   return 'Protección baja';
 }
+
