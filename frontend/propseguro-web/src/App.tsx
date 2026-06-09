@@ -1,21 +1,39 @@
 import { CSSProperties, FormEvent, ReactNode, useEffect, useState } from 'react';
 import {
+  AuthUser,
+  BetaAccessRequest,
   ChecklistItem,
+  CreateBetaAccessRequest,
+  CreateUserRequest,
   DocumentFinding,
   DocumentType,
+  ExpenseDocumentValidation,
+  ExpenseIntelligenceAnalysis,
   PropertyAnalysis,
   PropertyAnalysisSummary,
   PropertyCondition,
   PropertyDocument,
+  approveBetaAccessRequest,
   resolveApiUrl,
   addDocument,
   analyzeDocument,
+  clearStoredAuth,
   createAnalysis,
+  createBetaAccessRequest,
+  createUser,
   deleteAnalysis,
+  disableUser,
+  enableUser,
   getAnalysis,
+  getStoredAuthUser,
   importListing,
+  listBetaAccessRequests,
   listAnalyses,
+  listUsers,
+  login,
+  rejectBetaAccessRequest,
   saveDocumentText,
+  storeAuthSession,
   updateAnalysis,
   uploadCoverImage
 } from './api';
@@ -63,6 +81,8 @@ type CreateFormState = {
   bathrooms: string;
   buildingAgeYears: string;
   floor: string;
+  apartmentUnit: string;
+  unitIdentifier: string;
   hasBalcony: string;
   hasAmenities: string;
   isCreditEligible: string;
@@ -91,6 +111,8 @@ type DashboardSort =
 
 type SortDirection = 'asc' | 'desc';
 
+type WorkspaceTab = 'general' | 'price' | 'documents' | 'findings' | 'report';
+
 const emptyCreateForm: CreateFormState = {
   title: '',
   listingUrl: '',
@@ -105,6 +127,8 @@ const emptyCreateForm: CreateFormState = {
   bathrooms: '',
   buildingAgeYears: '',
   floor: '',
+  apartmentUnit: '',
+  unitIdentifier: '',
   hasBalcony: '',
   hasAmenities: '',
   isCreditEligible: '',
@@ -114,6 +138,7 @@ const emptyCreateForm: CreateFormState = {
 
 export function App() {
   const [path, setPath] = useState(() => window.location.pathname);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => getStoredAuthUser());
   const [analysis, setAnalysis] = useState<PropertyAnalysis | null>(null);
   const [analyses, setAnalyses] = useState<PropertyAnalysisSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -129,6 +154,16 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (isProtectedPath(path) && !currentUser) {
+      navigate('/login');
+      return;
+    }
+
+    if (path.startsWith('/admin') && currentUser?.role !== 'Admin') {
+      navigate('/properties');
+      return;
+    }
+
     if (path === '/properties') {
       void refreshDashboard();
       return;
@@ -138,7 +173,7 @@ export function App() {
     if (id) {
       void loadAnalysis(id);
     }
-  }, [path]);
+  }, [path, currentUser]);
 
   function navigate(to: string) {
     window.history.pushState(null, '', to);
@@ -236,6 +271,19 @@ export function App() {
     }
   }
 
+  function handleLoginSuccess(user: AuthUser) {
+    setCurrentUser(user);
+    navigate('/properties');
+  }
+
+  function handleLogout() {
+    clearStoredAuth();
+    setCurrentUser(null);
+    setAnalysis(null);
+    setAnalyses([]);
+    navigate('/');
+  }
+
   const detailId = getPropertyIdFromPath(path);
 
   return (
@@ -261,9 +309,33 @@ export function App() {
           <button className="topnav-link" type="button" onClick={() => navigateToLandingSection('contact')}>
             Contacto
           </button>
-          <button className={path === '/properties' ? 'topbar-cta active' : 'topbar-cta'} type="button" onClick={() => navigate('/properties')}>
-            Ingresar
-          </button>
+          {currentUser ? (
+            <>
+              <button className={path === '/properties' ? 'topnav-link active' : 'topnav-link'} type="button" onClick={() => navigate('/properties')}>
+                Propiedades
+              </button>
+              <button className={path === '/properties/new' ? 'topnav-link active' : 'topnav-link'} type="button" onClick={() => navigate('/properties/new')}>
+                Nueva propiedad
+              </button>
+              {currentUser.role === 'Admin' && (
+                <button className={path === '/admin' ? 'topnav-link active' : 'topnav-link'} type="button" onClick={() => navigate('/admin')}>
+                  Admin
+                </button>
+              )}
+              <button className="topbar-cta" type="button" onClick={handleLogout}>
+                Salir
+              </button>
+            </>
+          ) : (
+            <>
+              <button className={path === '/solicitar-acceso' ? 'topnav-link active' : 'topnav-link'} type="button" onClick={() => navigate('/solicitar-acceso')}>
+                Solicitar acceso
+              </button>
+              <button className={path === '/login' ? 'topbar-cta active' : 'topbar-cta'} type="button" onClick={() => navigate('/login')}>
+                Ingresar
+              </button>
+            </>
+          )}
         </nav>
       </header>
 
@@ -287,6 +359,28 @@ export function App() {
         <LandingPage
           onCreate={() => navigate('/properties/new')}
           onDashboard={() => navigate('/properties')}
+          onRequestAccess={() => navigate('/solicitar-acceso')}
+        />
+      )}
+      {path === '/login' && (
+        <LoginPage
+          onLogin={handleLoginSuccess}
+          onRequestAccess={() => navigate('/solicitar-acceso')}
+          onError={setError}
+          setLoading={setLoading}
+        />
+      )}
+      {path === '/solicitar-acceso' && (
+        <BetaAccessPage
+          onLogin={() => navigate('/login')}
+          onError={setError}
+          setLoading={setLoading}
+        />
+      )}
+      {path === '/admin' && currentUser?.role === 'Admin' && (
+        <AdminPage
+          onError={setError}
+          setLoading={setLoading}
         />
       )}
       {path === '/properties' && (
@@ -345,10 +439,12 @@ export function App() {
 
 function LandingPage({
   onCreate,
-  onDashboard
+  onDashboard,
+  onRequestAccess
 }: {
   onCreate: () => void;
   onDashboard: () => void;
+  onRequestAccess: () => void;
 }) {
   return (
     <div className="landing-page">
@@ -373,6 +469,9 @@ function LandingPage({
               Ver propiedades cargadas
             </button>
           </div>
+          <button className="landing-beta-link" type="button" onClick={onRequestAccess}>
+            Solicitar acceso a la beta privada
+          </button>
           <p className="trust-note">
             No reemplaza la revisión de un escribano o abogado. Te damos una segunda opinión para ayudarte a tomar mejores decisiones.
           </p>
@@ -410,6 +509,335 @@ function LandingPage({
         </p>
       </section>
     </div>
+  );
+}
+
+function LoginPage({
+  onLogin,
+  onRequestAccess,
+  onError,
+  setLoading
+}: {
+  onLogin: (user: AuthUser) => void;
+  onRequestAccess: () => void;
+  onError: (message: string | null) => void;
+  setLoading: (loading: boolean) => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setSubmitting(true);
+    setLoading(true);
+    onError(null);
+
+    try {
+      const session = await login(email, password);
+      storeAuthSession(session);
+      onLogin(session.user);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'No se pudo iniciar sesión.');
+    } finally {
+      setSubmitting(false);
+      setLoading(false);
+    }
+  }
+
+  return (
+    <section className="auth-page">
+      <div className="auth-card">
+        <p className="eyebrow">BETA PRIVADA</p>
+        <h1>Ingresá a PropSegura</h1>
+        <p>Accedé a tus oportunidades inmobiliarias, documentos y análisis guardados.</p>
+        <form className="stack-form" onSubmit={handleSubmit}>
+          <label className="field">
+            <span>Email</span>
+            <input type="email" value={email} autoComplete="email" required onChange={(event) => setEmail(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>Contraseña</span>
+            <input type="password" value={password} autoComplete="current-password" required onChange={(event) => setPassword(event.target.value)} />
+          </label>
+          <button className={`primary-button ${submitting ? 'btn-loading' : ''}`} type="submit" disabled={submitting} aria-busy={submitting ? 'true' : undefined}>
+            {submitting && <span className="button-spinner" aria-hidden="true" />}
+            {submitting ? 'Ingresando...' : 'Ingresar'}
+          </button>
+        </form>
+        <button className="text-button" type="button" onClick={onRequestAccess}>
+          ¿Todavía no tenés acceso? Solicitá una invitación
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function BetaAccessPage({
+  onLogin,
+  onError,
+  setLoading
+}: {
+  onLogin: () => void;
+  onError: (message: string | null) => void;
+  setLoading: (loading: boolean) => void;
+}) {
+  const [form, setForm] = useState<CreateBetaAccessRequest>({
+    email: '',
+    fullName: '',
+    phone: '',
+    intendedUse: '',
+    message: ''
+  });
+  const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setSubmitting(true);
+    setLoading(true);
+    onError(null);
+
+    try {
+      await createBetaAccessRequest({
+        ...form,
+        phone: nullableText(form.phone ?? ''),
+        intendedUse: nullableText(form.intendedUse ?? ''),
+        message: nullableText(form.message ?? '')
+      });
+      setSubmitted(true);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'No se pudo enviar la solicitud.');
+    } finally {
+      setSubmitting(false);
+      setLoading(false);
+    }
+  }
+
+  return (
+    <section className="auth-page beta-page">
+      <div className="auth-card beta-card">
+        <p className="eyebrow">ACCESO ANTICIPADO</p>
+        <h1>Solicitá acceso a PropSegura</h1>
+        {submitted ? (
+          <div className="auth-success">
+            <strong>Solicitud recibida.</strong>
+            <p>Te vamos a contactar cuando tu acceso esté aprobado.</p>
+            <button className="secondary-button" type="button" onClick={onLogin}>Ir a ingresar</button>
+          </div>
+        ) : (
+          <form className="stack-form" onSubmit={handleSubmit}>
+            <TextField label="Nombre y apellido" value={form.fullName} required onChange={(fullName) => setForm({ ...form, fullName })} />
+            <TextField label="Email" type="email" value={form.email} required onChange={(email) => setForm({ ...form, email })} />
+            <TextField label="Teléfono" value={form.phone ?? ''} onChange={(phone) => setForm({ ...form, phone })} />
+            <TextField label="Uso previsto" value={form.intendedUse ?? ''} placeholder="Ej: comprar mi primera propiedad" onChange={(intendedUse) => setForm({ ...form, intendedUse })} />
+            <label className="field">
+              <span>Mensaje</span>
+              <textarea value={form.message ?? ''} onChange={(event) => setForm({ ...form, message: event.target.value })} />
+            </label>
+            <button className={`primary-button ${submitting ? 'btn-loading' : ''}`} type="submit" disabled={submitting} aria-busy={submitting ? 'true' : undefined}>
+              {submitting && <span className="button-spinner" aria-hidden="true" />}
+              {submitting ? 'Enviando...' : 'Solicitar acceso'}
+            </button>
+          </form>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function AdminPage({
+  onError,
+  setLoading
+}: {
+  onError: (message: string | null) => void;
+  setLoading: (loading: boolean) => void;
+}) {
+  const [requests, setRequests] = useState<BetaAccessRequest[]>([]);
+  const [users, setUsers] = useState<AuthUser[]>([]);
+  const [tempPassword, setTempPassword] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [newUser, setNewUser] = useState<CreateUserRequest>({
+    email: '',
+    fullName: '',
+    password: '',
+    role: 'User'
+  });
+
+  useEffect(() => {
+    void refreshAdmin();
+  }, []);
+
+  async function refreshAdmin() {
+    setLoading(true);
+    onError(null);
+
+    try {
+      const [nextRequests, nextUsers] = await Promise.all([listBetaAccessRequests(), listUsers()]);
+      setRequests(nextRequests);
+      setUsers(nextUsers);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'No se pudo cargar administración.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleApprove(request: BetaAccessRequest) {
+    setBusyId(request.id);
+    setLoading(true);
+    onError(null);
+
+    try {
+      const result = await approveBetaAccessRequest(request.id);
+      setTempPassword(result.temporaryPassword ?? null);
+      await refreshAdmin();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'No se pudo aprobar la solicitud.');
+    } finally {
+      setBusyId(null);
+      setLoading(false);
+    }
+  }
+
+  async function handleReject(request: BetaAccessRequest) {
+    setBusyId(request.id);
+    setLoading(true);
+    onError(null);
+
+    try {
+      await rejectBetaAccessRequest(request.id);
+      await refreshAdmin();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'No se pudo rechazar la solicitud.');
+    } finally {
+      setBusyId(null);
+      setLoading(false);
+    }
+  }
+
+  async function handleCreateUser(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    onError(null);
+
+    try {
+      await createUser(newUser);
+      setNewUser({ email: '', fullName: '', password: '', role: 'User' });
+      await refreshAdmin();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'No se pudo crear el usuario.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleToggleUser(user: AuthUser) {
+    setBusyId(user.id);
+    setLoading(true);
+    onError(null);
+
+    try {
+      if (user.status === 'Disabled') {
+        await enableUser(user.id);
+      } else {
+        await disableUser(user.id);
+      }
+
+      await refreshAdmin();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'No se pudo actualizar el usuario.');
+    } finally {
+      setBusyId(null);
+      setLoading(false);
+    }
+  }
+
+  return (
+    <section className="admin-page">
+      <div className="admin-heading">
+        <div>
+          <p className="eyebrow">ADMIN</p>
+          <h1>Beta privada</h1>
+          <p>Gestioná solicitudes de acceso y usuarios habilitados.</p>
+        </div>
+        <button className="secondary-button" type="button" onClick={() => void refreshAdmin()}>
+          Actualizar
+        </button>
+      </div>
+
+      {tempPassword && (
+        <div className="admin-secret">
+          <strong>Contraseña temporal generada:</strong>
+          <code>{tempPassword}</code>
+        </div>
+      )}
+
+      <div className="admin-grid">
+        <section className="admin-card">
+          <h2>Solicitudes beta</h2>
+          <div className="admin-list">
+            {requests.length === 0 ? (
+              <p className="muted">No hay solicitudes por ahora.</p>
+            ) : requests.map((request) => (
+              <article className="admin-row" key={request.id}>
+                <div>
+                  <strong>{request.fullName}</strong>
+                  <span>{request.email}</span>
+                  {request.intendedUse && <p>{request.intendedUse}</p>}
+                </div>
+                <Badge tone={request.status === 'Pending' ? 'warning' : request.status === 'Approved' ? 'success' : 'neutral'}>
+                  {betaStatusLabel(request.status)}
+                </Badge>
+                {request.status === 'Pending' && (
+                  <div className="admin-row-actions">
+                    <button className="primary-button" type="button" disabled={busyId === request.id} onClick={() => void handleApprove(request)}>
+                      Aprobar
+                    </button>
+                    <button className="danger-text-button" type="button" disabled={busyId === request.id} onClick={() => void handleReject(request)}>
+                      Rechazar
+                    </button>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="admin-card">
+          <h2>Usuarios</h2>
+          <form className="admin-create-user" onSubmit={handleCreateUser}>
+            <TextField label="Nombre" value={newUser.fullName} required onChange={(fullName) => setNewUser({ ...newUser, fullName })} />
+            <TextField label="Email" type="email" value={newUser.email} required onChange={(email) => setNewUser({ ...newUser, email })} />
+            <TextField label="Contraseña inicial" type="password" value={newUser.password} required onChange={(password) => setNewUser({ ...newUser, password })} />
+            <label className="field">
+              <span>Rol</span>
+              <select value={newUser.role} onChange={(event) => setNewUser({ ...newUser, role: event.target.value as CreateUserRequest['role'] })}>
+                <option value="User">Usuario</option>
+                <option value="Admin">Admin</option>
+              </select>
+            </label>
+            <button className="primary-button" type="submit">Crear usuario</button>
+          </form>
+          <div className="admin-list">
+            {users.map((user) => (
+              <article className="admin-row" key={user.id}>
+                <div>
+                  <strong>{user.fullName}</strong>
+                  <span>{user.email}</span>
+                </div>
+                <Badge tone={user.status === 'Disabled' ? 'critical' : user.role === 'Admin' ? 'info' : 'success'}>
+                  {user.role === 'Admin' ? 'Admin' : userStatusLabel(user.status)}
+                </Badge>
+                <button className="secondary-button" type="button" disabled={busyId === user.id} onClick={() => void handleToggleUser(user)}>
+                  {user.status === 'Disabled' ? 'Habilitar' : 'Deshabilitar'}
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+    </section>
   );
 }
 
@@ -1189,6 +1617,8 @@ function CreateAnalysisForm({
         bathrooms: nullableNumber(form.bathrooms),
         buildingAgeYears: nullableNumber(form.buildingAgeYears),
         floor: nullableNumber(form.floor),
+        apartmentUnit: nullableText(form.apartmentUnit),
+        unitIdentifier: nullableText(form.unitIdentifier),
         hasBalcony: nullableBoolean(form.hasBalcony),
         hasAmenities: nullableBoolean(form.hasAmenities),
         isCreditEligible: nullableBoolean(form.isCreditEligible),
@@ -1299,6 +1729,9 @@ function CreateAnalysisForm({
               <TextField label="Baños" type="number" value={form.bathrooms} onChange={(bathrooms) => setForm({ ...form, bathrooms })} />
               <TextField label="Antigüedad" type="number" value={form.buildingAgeYears} onChange={(buildingAgeYears) => setForm({ ...form, buildingAgeYears })} />
               <TextField label="Piso" type="number" value={form.floor} onChange={(floor) => setForm({ ...form, floor })} />
+              <TextField label="Departamento / Unidad" value={form.apartmentUnit} placeholder="Ej: B" onChange={(apartmentUnit) => setForm({ ...form, apartmentUnit })} />
+              <TextField label="Identificador de unidad" value={form.unitIdentifier} placeholder="Ej: UF 12" onChange={(unitIdentifier) => setForm({ ...form, unitIdentifier })} />
+              <p className="field-helper field-wide">Estos datos ayudan a validar que las expensas correspondan a la propiedad correcta.</p>
               <SelectField label="Balcón" value={form.hasBalcony} onChange={(hasBalcony) => setForm({ ...form, hasBalcony })} />
               <SelectField label="Amenities" value={form.hasAmenities} onChange={(hasAmenities) => setForm({ ...form, hasAmenities })} />
               <SelectField label="Apto crédito" value={form.isCreditEligible} onChange={(isCreditEligible) => setForm({ ...form, isCreditEligible })} />
@@ -1497,6 +1930,8 @@ function PropertyEditForm({
         bathrooms: nullableNumber(form.bathrooms),
         buildingAgeYears: nullableNumber(form.buildingAgeYears),
         floor: nullableNumber(form.floor),
+        apartmentUnit: nullableText(form.apartmentUnit),
+        unitIdentifier: nullableText(form.unitIdentifier),
         hasBalcony: nullableBoolean(form.hasBalcony),
         hasAmenities: nullableBoolean(form.hasAmenities),
         isCreditEligible: nullableBoolean(form.isCreditEligible),
@@ -1540,6 +1975,9 @@ function PropertyEditForm({
           <TextField label="Baños" type="number" value={form.bathrooms} onChange={(bathrooms) => setForm({ ...form, bathrooms })} />
           <TextField label="Antigüedad" type="number" value={form.buildingAgeYears} onChange={(buildingAgeYears) => setForm({ ...form, buildingAgeYears })} />
           <TextField label="Piso" type="number" value={form.floor} onChange={(floor) => setForm({ ...form, floor })} />
+          <TextField label="Departamento / Unidad" value={form.apartmentUnit} onChange={(apartmentUnit) => setForm({ ...form, apartmentUnit })} />
+          <TextField label="Identificador de unidad" value={form.unitIdentifier} onChange={(unitIdentifier) => setForm({ ...form, unitIdentifier })} />
+          <p className="field-helper field-wide">Estos datos ayudan a validar que las expensas correspondan a la propiedad correcta.</p>
           <SelectField label="Balcón" value={form.hasBalcony} onChange={(hasBalcony) => setForm({ ...form, hasBalcony })} />
           <SelectField label="Amenities" value={form.hasAmenities} onChange={(hasAmenities) => setForm({ ...form, hasAmenities })} />
           <SelectField label="Apto crédito" value={form.isCreditEligible} onChange={(isCreditEligible) => setForm({ ...form, isCreditEligible })} />
@@ -1589,6 +2027,9 @@ function PropertyEditForm({
         <TextField label="Baños" type="number" value={form.bathrooms} onChange={(bathrooms) => setForm({ ...form, bathrooms })} />
         <TextField label="Antigüedad del edificio" type="number" value={form.buildingAgeYears} onChange={(buildingAgeYears) => setForm({ ...form, buildingAgeYears })} />
         <TextField label="Piso" type="number" value={form.floor} onChange={(floor) => setForm({ ...form, floor })} />
+        <TextField label="Departamento / Unidad" value={form.apartmentUnit} onChange={(apartmentUnit) => setForm({ ...form, apartmentUnit })} />
+        <TextField label="Identificador de unidad" value={form.unitIdentifier} onChange={(unitIdentifier) => setForm({ ...form, unitIdentifier })} />
+        <p className="field-helper field-wide">Estos datos ayudan a validar que las expensas correspondan a la propiedad correcta.</p>
         <SelectField label="Balcón" value={form.hasBalcony} onChange={(hasBalcony) => setForm({ ...form, hasBalcony })} />
         <SelectField label="Amenities" value={form.hasAmenities} onChange={(hasAmenities) => setForm({ ...form, hasAmenities })} />
         <SelectField label="Apto crédito" value={form.isCreditEligible} onChange={(isCreditEligible) => setForm({ ...form, isCreditEligible })} />
@@ -1642,18 +2083,7 @@ function AnalysisDetail({
   const progressPercent = getAnalysisProgressPercent(analysis, checklistStats);
   const workspaceFormId = `property-edit-${analysis.id}`;
   const [uploadingCover, setUploadingCover] = useState(false);
-
-  function scrollToDocuments() {
-    document.getElementById('documents-workspace')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
-  function scrollToFindings() {
-    document.getElementById('findings-workspace')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
-  function scrollToReport() {
-    document.getElementById('report-workspace')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>('general');
 
   async function handleCoverImageChange(file: File | null) {
     if (!file) {
@@ -1706,11 +2136,11 @@ function AnalysisDetail({
           <strong>{formatMoney(analysis.priceUsd)} · {formatNumber(analysis.totalSquareMeters)} m²</strong>
         </div>
         <div className="sidebar-progress-list">
-          <WorkspaceStep title="Información básica" text="Completado" state="done" />
-          <WorkspaceStep title="Precio y características" text="Completado" state="done" />
-          <WorkspaceStep title="Documentación" text={checklistStats.percent >= 100 ? 'Completado' : 'En progreso'} state="active" number="3" />
-          <WorkspaceStep title="Análisis y hallazgos" text={analysis.documentFindings.length > 0 ? 'En progreso' : 'Pendiente'} number="4" />
-          <WorkspaceStep title="Informe final" text="Pendiente" number="5" />
+          <WorkspaceStep title="Información básica" text="Completado" state={activeTab === 'general' ? 'active' : 'done'} number="1" onClick={() => setActiveTab('general')} />
+          <WorkspaceStep title="Precio y características" text="Completado" state={activeTab === 'price' ? 'active' : 'done'} number="2" onClick={() => setActiveTab('price')} />
+          <WorkspaceStep title="Documentación" text={checklistStats.percent >= 100 ? 'Completado' : 'En progreso'} state={activeTab === 'documents' ? 'active' : 'pending'} number="3" onClick={() => setActiveTab('documents')} />
+          <WorkspaceStep title="Análisis y hallazgos" text={analysis.documentFindings.length > 0 ? 'En progreso' : 'Pendiente'} state={activeTab === 'findings' ? 'active' : 'pending'} number="4" onClick={() => setActiveTab('findings')} />
+          <WorkspaceStep title="Informe final" text="Pendiente" state={activeTab === 'report' ? 'active' : 'pending'} number="5" onClick={() => setActiveTab('report')} />
         </div>
         <div className="wizard-help-card edit-sidebar-help">
           <span className="wizard-help-icon" aria-hidden="true">◇</span>
@@ -1735,7 +2165,7 @@ function AnalysisDetail({
             </div>
           </div>
           <div className="property-edit-actions">
-            <button className="secondary-button" type="button" onClick={scrollToDocuments}>
+            <button className="secondary-button" type="button" onClick={() => setActiveTab('documents')}>
               Más acciones
             </button>
             <button className="secondary-button" type="submit" form={workspaceFormId}>
@@ -1756,13 +2186,14 @@ function AnalysisDetail({
         </section>
 
         <nav className="edit-tabs" aria-label="Secciones de la propiedad">
-          <button className="active" type="button">⌂ General</button>
-          <button type="button">◇ Precio y características</button>
-          <button type="button" onClick={scrollToDocuments}>▤ Documentos</button>
-          <button type="button" onClick={scrollToFindings}>◌ Hallazgos</button>
-          <button type="button" onClick={scrollToReport}>▧ Informe</button>
+          <button className={activeTab === 'general' ? 'active' : ''} type="button" onClick={() => setActiveTab('general')}>⌂ General</button>
+          <button className={activeTab === 'price' ? 'active' : ''} type="button" onClick={() => setActiveTab('price')}>◇ Precio y características</button>
+          <button className={activeTab === 'documents' ? 'active' : ''} type="button" onClick={() => setActiveTab('documents')}>▤ Documentos</button>
+          <button className={activeTab === 'findings' ? 'active' : ''} type="button" onClick={() => setActiveTab('findings')}>◌ Hallazgos</button>
+          <button className={activeTab === 'report' ? 'active' : ''} type="button" onClick={() => setActiveTab('report')}>▧ Informe</button>
         </nav>
 
+        {activeTab === 'general' && (
         <div className="property-edit-content-grid">
           <div>
             <section className="edit-form-card">
@@ -1786,7 +2217,10 @@ function AnalysisDetail({
             <WizardInfoCard icon="◇" title="¿Por qué analizamos?" text="Evaluamos oportunidades, riesgos legales, edilicios y financieros para que compres más seguro." />
           </aside>
         </div>
+        )}
 
+        {activeTab === 'price' && (
+        <>
         <section className="panel negotiation-card edit-continuation-card">
           <div className="section-heading compact-heading">
             <div>
@@ -1807,6 +2241,11 @@ function AnalysisDetail({
           <p className="score-summary">{analysis.negotiationAnalysis?.explanation ?? analysis.negotiationExplanation}</p>
         </section>
 
+        <BuildingHealthSection expenseIntelligence={analysis.expenseIntelligence} />
+        </>
+        )}
+
+        {activeTab === 'documents' && (
         <section className="panel document-workspace edit-continuation-card" id="documents-workspace">
           <div className="section-heading">
             <div>
@@ -1830,7 +2269,9 @@ function AnalysisDetail({
             <DocumentsList analysisId={analysis.id} documents={analysis.documents} findings={analysis.documentFindings} onRefresh={onRefresh} onError={onError} setLoading={setLoading} />
           </div>
         </section>
+        )}
 
+        {activeTab === 'findings' && (
         <section className="panel edit-continuation-card" id="findings-workspace">
           <div className="section-heading compact-heading">
             <div>
@@ -1840,11 +2281,14 @@ function AnalysisDetail({
           </div>
           <GroupedFindings riskFindings={analysis.riskFindings} documentFindings={analysis.documentFindings} />
         </section>
+        )}
 
+        {activeTab === 'report' && (
         <section className="wizard-disclaimer edit-report-note" id="report-workspace">
           <span aria-hidden="true">◇</span>
           <p><strong>Informe final:</strong> próximamente vas a poder generar un resumen exportable. Por ahora, usá esta pantalla para completar datos, documentos y hallazgos.</p>
         </section>
+        )}
       </main>
     </div>
   );
@@ -1854,20 +2298,36 @@ function WorkspaceStep({
   title,
   text,
   state = 'pending',
-  number
+  number,
+  onClick
 }: {
   title: string;
   text: string;
   state?: 'done' | 'active' | 'pending';
   number?: string;
+  onClick?: () => void;
 }) {
-  return (
-    <div className={`workspace-step workspace-step-${state}`}>
+  const content = (
+    <>
       <span>{state === 'done' ? '✓' : number}</span>
       <div>
         <strong>{title}</strong>
         <p>{text}</p>
       </div>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button className={`workspace-step workspace-step-button workspace-step-${state}`} type="button" onClick={onClick}>
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className={`workspace-step workspace-step-${state}`}>
+      {content}
     </div>
   );
 }
@@ -1977,6 +2437,81 @@ function ChecklistProgress({ stats }: { stats: ChecklistStats }) {
   );
 }
 
+function BuildingHealthSection({ expenseIntelligence }: { expenseIntelligence?: ExpenseIntelligenceAnalysis | null }) {
+  if (!expenseIntelligence) {
+    return (
+      <section className="panel building-health-card edit-continuation-card">
+        <div className="section-heading compact-heading">
+          <div>
+            <p className="eyebrow">Expensas</p>
+            <h3>Salud del edificio</h3>
+            <p className="section-copy">Subí y analizá una liquidación de expensas para detectar costos ocultos, obras, morosidad o riesgos del consorcio.</p>
+          </div>
+          <Badge tone="neutral">Pendiente</Badge>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="panel building-health-card edit-continuation-card">
+      <div className="section-heading compact-heading">
+        <div>
+          <p className="eyebrow">Expensas</p>
+          <h3>Salud del edificio</h3>
+          <p className="section-copy">{expenseIntelligence.summary}</p>
+        </div>
+        <Badge tone={buildingHealthTone(expenseIntelligence.buildingHealthScore)}>{expenseIntelligence.classification}</Badge>
+      </div>
+
+      <div className="building-health-layout">
+        <div className={`building-health-score ${buildingHealthTone(expenseIntelligence.buildingHealthScore)}`}>
+          <strong>{expenseIntelligence.buildingHealthScore}</strong>
+          <span>BuildingHealthScore</span>
+        </div>
+        <div className="building-health-lists">
+          <div>
+            <h4>Preguntas sugeridas</h4>
+            {expenseIntelligence.suggestedQuestions.length === 0 ? (
+              <p className="section-copy">No hay preguntas nuevas por ahora.</p>
+            ) : (
+              <ul>
+                {expenseIntelligence.suggestedQuestions.map((question) => (
+                  <li key={question}>{question}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div>
+            <h4>Puntos para negociar</h4>
+            {expenseIntelligence.suggestedNegotiationPoints.length === 0 ? (
+              <p className="section-copy">No hay puntos nuevos por ahora.</p>
+            ) : (
+              <ul>
+                {expenseIntelligence.suggestedNegotiationPoints.map((point) => (
+                  <li key={point}>{point}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {expenseIntelligence.findings.length > 0 && (
+        <div className="building-finding-strip">
+          {expenseIntelligence.findings.map((finding) => (
+            <article className="building-finding" key={finding.id}>
+              <Badge tone={findingTone(finding.severity)}>{findingSeverityLabel(finding.severity)}</Badge>
+              <strong>{finding.title}</strong>
+              <p>{finding.buyerImpact ?? finding.description}</p>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function MissingDocuments({ items }: { items: ChecklistItem[] }) {
   const missing = items.filter((item) => item.isRequired && !item.isProvided);
 
@@ -2013,6 +2548,8 @@ function PropertySummary({ analysis }: { analysis: PropertyAnalysis }) {
       <Info label="Baños" value={formatNumber(analysis.bathrooms)} />
       <Info label="Antigüedad" value={formatNumber(analysis.buildingAgeYears)} />
       <Info label="Piso" value={formatNumber(analysis.floor)} />
+      <Info label="Departamento / Unidad" value={analysis.apartmentUnit || 'Sin dato'} />
+      <Info label="Identificador de unidad" value={analysis.unitIdentifier || 'Sin dato'} />
       <Info label="Balcón" value={formatBoolean(analysis.hasBalcony)} />
       <Info label="Amenities" value={formatBoolean(analysis.hasAmenities)} />
       <Info label="Apto crédito" value={formatBoolean(analysis.isCreditEligible)} />
@@ -2328,6 +2865,19 @@ function DocumentCard({
           El PDF parece escaneado. PropSegura intentó leerlo con OCR. Revisá el texto antes de analizar.
         </div>
       )}
+      {document.documentType === 'Expenses' && document.expenseValidation && (
+        <div className={`expense-validation-box expense-validation-${document.expenseValidation.classification.toLowerCase()}`}>
+          <div>
+            <strong>{document.expenseValidation.label}</strong>
+            <p>{document.expenseValidation.explanation}</p>
+          </div>
+          <div className="expense-validation-grid">
+            <Info label="Confianza" value={`${document.expenseValidation.confidenceScore}%`} />
+            <Info label="Unidad detectada" value={formatDetectedExpenseUnit(document.expenseValidation)} />
+            <Info label="Expensa detectada" value={formatMoney(document.expenseValidation.detectedExpenseAmount)} />
+          </div>
+        </div>
+      )}
       <div className="text-workflow">
         <div className="text-workflow-header">
           <strong>Texto del documento</strong>
@@ -2577,6 +3127,19 @@ function findingCategoryLabel(category: string) {
   return labels[category] ?? category;
 }
 
+function buildingHealthTone(score: number) {
+  if (score >= 90) {
+    return 'success';
+  }
+  if (score >= 70) {
+    return 'info';
+  }
+  if (score >= 50) {
+    return 'warning';
+  }
+  return 'danger';
+}
+
 function textExtractionTone(status: string) {
   if (status === 'Extracted' || status === 'ManuallyEdited') {
     return 'success';
@@ -2801,6 +3364,24 @@ function formatImportedValue(value?: number | null) {
   return value == null ? null : String(value);
 }
 
+function formatDetectedExpenseUnit(validation: ExpenseDocumentValidation) {
+  const parts = [];
+
+  if (validation.detectedFloor != null) {
+    parts.push(`Piso ${validation.detectedFloor}`);
+  }
+
+  if (validation.detectedApartmentUnit) {
+    parts.push(`Depto ${validation.detectedApartmentUnit}`);
+  }
+
+  if (validation.detectedUnitIdentifier) {
+    parts.push(`UF ${validation.detectedUnitIdentifier}`);
+  }
+
+  return parts.length === 0 ? 'Sin dato' : parts.join(' · ');
+}
+
 function formStateFromAnalysis(analysis: PropertyAnalysis): CreateFormState {
   return {
     title: analysis.title,
@@ -2816,6 +3397,8 @@ function formStateFromAnalysis(analysis: PropertyAnalysis): CreateFormState {
     bathrooms: formatImportedValue(analysis.bathrooms) ?? '',
     buildingAgeYears: formatImportedValue(analysis.buildingAgeYears) ?? '',
     floor: formatImportedValue(analysis.floor) ?? '',
+    apartmentUnit: analysis.apartmentUnit ?? '',
+    unitIdentifier: analysis.unitIdentifier ?? '',
     hasBalcony: booleanToFormValue(analysis.hasBalcony),
     hasAmenities: booleanToFormValue(analysis.hasAmenities),
     isCreditEligible: booleanToFormValue(analysis.isCreditEligible),
@@ -2988,6 +3571,30 @@ function livingRank(analysis: PropertyAnalysisSummary) {
     return 2;
   }
   return 0;
+}
+
+function isProtectedPath(path: string) {
+  return path.startsWith('/properties') || path.startsWith('/admin');
+}
+
+function betaStatusLabel(status: BetaAccessRequest['status']) {
+  const labels: Record<BetaAccessRequest['status'], string> = {
+    Pending: 'Pendiente',
+    Approved: 'Aprobada',
+    Rejected: 'Rechazada'
+  };
+
+  return labels[status];
+}
+
+function userStatusLabel(status: AuthUser['status']) {
+  const labels: Record<AuthUser['status'], string> = {
+    Invited: 'Invitado',
+    Active: 'Activo',
+    Disabled: 'Deshabilitado'
+  };
+
+  return labels[status];
 }
 
 function getPropertyIdFromPath(path: string) {

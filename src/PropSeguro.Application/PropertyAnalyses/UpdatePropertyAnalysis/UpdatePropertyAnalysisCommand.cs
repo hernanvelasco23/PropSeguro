@@ -20,24 +20,34 @@ public sealed record UpdatePropertyAnalysisCommand(
     int? Bathrooms,
     int? BuildingAgeYears,
     int? Floor,
+    string? ApartmentUnit,
+    string? UnitIdentifier,
     bool? HasBalcony,
     bool? HasAmenities,
     bool? IsCreditEligible,
     PropertyCondition? PropertyCondition,
     string? Notes) : IRequest<PropertyAnalysisDto?>;
 
-public sealed class UpdatePropertyAnalysisCommandHandler(IApplicationDbContext dbContext)
-    : IRequestHandler<UpdatePropertyAnalysisCommand, PropertyAnalysisDto?>
+public sealed class UpdatePropertyAnalysisCommandHandler : IRequestHandler<UpdatePropertyAnalysisCommand, PropertyAnalysisDto?>
 {
+    private readonly IApplicationDbContext _dbContext;
+    private readonly ICurrentUserContext? _currentUser;
+
+    public UpdatePropertyAnalysisCommandHandler(IApplicationDbContext dbContext, ICurrentUserContext? currentUser = null)
+    {
+        _dbContext = dbContext;
+        _currentUser = currentUser;
+    }
+
     public async Task<PropertyAnalysisDto?> Handle(UpdatePropertyAnalysisCommand request, CancellationToken cancellationToken)
     {
-        var analysis = await dbContext.PropertyAnalyses
+        var analysis = await _dbContext.PropertyAnalyses
             .Include(item => item.Documents)
             .Include(item => item.RiskFindings)
             .Include(item => item.ChecklistItems)
             .FirstOrDefaultAsync(item => item.Id == request.Id, cancellationToken);
 
-        if (analysis is null)
+        if (analysis is null || !_currentUser.CanAccess(analysis))
         {
             return null;
         }
@@ -56,19 +66,21 @@ public sealed class UpdatePropertyAnalysisCommandHandler(IApplicationDbContext d
             request.Bathrooms,
             request.BuildingAgeYears,
             request.Floor,
+            request.ApartmentUnit,
+            request.UnitIdentifier,
             request.HasBalcony,
             request.HasAmenities,
             request.IsCreditEligible,
             request.PropertyCondition,
             request.Notes);
 
-        var documentFindings = await dbContext.DocumentFindings
+        var documentFindings = await _dbContext.DocumentFindings
             .Where(item => item.PropertyAnalysisId == request.Id)
             .ToListAsync(cancellationToken);
 
         analysis.RecalculateProtectionScore(documentFindings);
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return analysis.ToDto(documentFindings);
     }

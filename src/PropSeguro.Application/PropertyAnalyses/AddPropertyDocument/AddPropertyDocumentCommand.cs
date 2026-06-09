@@ -18,18 +18,26 @@ public sealed record AddPropertyDocumentCommand(
     TextExtractionQuality? TextExtractionQuality = null,
     string? ExtractionSummary = null) : IRequest<PropertyAnalysisDto?>;
 
-public sealed class AddPropertyDocumentCommandHandler(IApplicationDbContext dbContext)
-    : IRequestHandler<AddPropertyDocumentCommand, PropertyAnalysisDto?>
+public sealed class AddPropertyDocumentCommandHandler : IRequestHandler<AddPropertyDocumentCommand, PropertyAnalysisDto?>
 {
+    private readonly IApplicationDbContext _dbContext;
+    private readonly ICurrentUserContext? _currentUser;
+
+    public AddPropertyDocumentCommandHandler(IApplicationDbContext dbContext, ICurrentUserContext? currentUser = null)
+    {
+        _dbContext = dbContext;
+        _currentUser = currentUser;
+    }
+
     public async Task<PropertyAnalysisDto?> Handle(AddPropertyDocumentCommand request, CancellationToken cancellationToken)
     {
-        var analysis = await dbContext.PropertyAnalyses
+        var analysis = await _dbContext.PropertyAnalyses
             .Include(item => item.Documents)
             .Include(item => item.RiskFindings)
             .Include(item => item.ChecklistItems)
             .FirstOrDefaultAsync(item => item.Id == request.PropertyAnalysisId, cancellationToken);
 
-        if (analysis is null)
+        if (analysis is null || !_currentUser.CanAccess(analysis))
         {
             return null;
         }
@@ -55,21 +63,21 @@ public sealed class AddPropertyDocumentCommandHandler(IApplicationDbContext dbCo
                 request.ExtractionSummary);
         }
 
-        dbContext.PropertyDocuments.Add(document);
+        _dbContext.PropertyDocuments.Add(document);
 
         var checklistItem = analysis.ChecklistItems
             .FirstOrDefault(item => item.DocumentType == request.DocumentType);
 
         checklistItem?.MarkProvided();
 
-        var documentFindings = await dbContext.DocumentFindings
+        var documentFindings = await _dbContext.DocumentFindings
             .Where(item => item.PropertyAnalysisId == request.PropertyAnalysisId)
             .ToListAsync(cancellationToken);
 
         analysis.RecalculateProtectionScore(documentFindings, [document]);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
-        var updatedAnalysis = await dbContext.PropertyAnalyses
+        var updatedAnalysis = await _dbContext.PropertyAnalyses
             .Include(item => item.Documents)
             .Include(item => item.RiskFindings)
             .Include(item => item.ChecklistItems)

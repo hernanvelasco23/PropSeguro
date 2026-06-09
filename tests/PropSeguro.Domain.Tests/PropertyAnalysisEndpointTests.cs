@@ -1,22 +1,31 @@
 using MediatR;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using Microsoft.IdentityModel.Tokens;
+using PropSeguro.Application.Common;
 using PropSeguro.Application.PropertyAnalyses;
 using PropSeguro.Application.PropertyAnalyses.GetPropertyAnalysis;
 using PropSeguro.Application.PropertyAnalyses.UploadPropertyCoverImage;
+using PropSeguro.Infrastructure.Persistence;
 
 namespace PropSeguro.Domain.Tests;
 
 public sealed class PropertyAnalysisEndpointTests
 {
     [Fact]
-    public async Task GetPropertyAnalysis_with_unknown_id_returns_not_found()
+    public async Task GetPropertyAnalysis_without_token_returns_unauthorized()
     {
         await using var factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
                 builder.ConfigureServices(services =>
                 {
+                    ConfigureInMemoryDatabase(services);
                     services.AddSingleton<ISender, NotFoundSender>();
                 });
             });
@@ -25,7 +34,7 @@ public sealed class PropertyAnalysisEndpointTests
 
         var response = await client.GetAsync($"/api/property-analyses/{Guid.NewGuid()}");
 
-        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
@@ -38,11 +47,13 @@ public sealed class PropertyAnalysisEndpointTests
             {
                 builder.ConfigureServices(services =>
                 {
+                    ConfigureInMemoryDatabase(services);
                     services.AddSingleton<ISender>(sender);
                 });
             });
 
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", CreateToken());
         using var content = new MultipartFormDataContent();
         var image = new ByteArrayContent([0x89, 0x50, 0x4E, 0x47]);
         image.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
@@ -56,6 +67,8 @@ public sealed class PropertyAnalysisEndpointTests
         Assert.Equal("departamento.png", sender.LastUploadCommand.FileName);
         Assert.Equal("image/png", sender.LastUploadCommand.ContentType);
         Assert.EndsWith(".png", sender.LastUploadCommand.StoragePath);
+
+        DeleteUploadedFile(sender.LastUploadCommand.StoragePath);
     }
 
     [Fact]
@@ -67,11 +80,13 @@ public sealed class PropertyAnalysisEndpointTests
             {
                 builder.ConfigureServices(services =>
                 {
+                    ConfigureInMemoryDatabase(services);
                     services.AddSingleton<ISender>(new CoverImageSender(analysisId));
                 });
             });
 
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", CreateToken());
         using var content = new MultipartFormDataContent();
         var image = new ByteArrayContent([1, 2, 3]);
         image.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/plain");
@@ -91,11 +106,13 @@ public sealed class PropertyAnalysisEndpointTests
             {
                 builder.ConfigureServices(services =>
                 {
+                    ConfigureInMemoryDatabase(services);
                     services.AddSingleton<ISender>(new CoverImageSender(analysisId));
                 });
             });
 
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", CreateToken());
         using var content = new MultipartFormDataContent();
         var image = new ByteArrayContent(new byte[Program.MaxCoverImageSizeBytes + 1]);
         image.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
@@ -114,11 +131,13 @@ public sealed class PropertyAnalysisEndpointTests
             {
                 builder.ConfigureServices(services =>
                 {
+                    ConfigureInMemoryDatabase(services);
                     services.AddSingleton<ISender, NotFoundSender>();
                 });
             });
 
         using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", CreateToken());
         using var content = new MultipartFormDataContent();
         var image = new ByteArrayContent([0xFF, 0xD8, 0xFF]);
         image.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
@@ -161,6 +180,56 @@ public sealed class PropertyAnalysisEndpointTests
         {
             await Task.CompletedTask;
             yield break;
+        }
+    }
+
+    private static string CreateToken()
+    {
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("dev-only-change-this-signing-key-for-propsegura-private-beta-2026"));
+        var token = new JwtSecurityToken(
+            issuer: "PropSegura",
+            audience: "PropSegura",
+            claims:
+            [
+                new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString("D")),
+                new Claim(ClaimTypes.Email, "test@propsegura.local"),
+                new Claim(ClaimTypes.Role, "Admin")
+            ],
+            expires: DateTime.UtcNow.AddHours(1),
+            signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private static void ConfigureInMemoryDatabase(IServiceCollection services)
+    {
+        services.RemoveAll<DbContextOptions<ApplicationDbContext>>();
+        services.RemoveAll<IApplicationDbContext>();
+
+        services.AddDbContext<ApplicationDbContext>(options =>
+            options.UseInMemoryDatabase("PropertyEndpointTests-" + Guid.NewGuid()));
+        services.AddScoped<IApplicationDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>());
+    }
+
+    private static void DeleteUploadedFile(string storagePath)
+    {
+        var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
+
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "PropSeguro.sln")))
+        {
+            directory = directory.Parent;
+        }
+
+        if (directory is null)
+        {
+            return;
+        }
+
+        var fullPath = Path.Combine(directory.FullName, storagePath.Replace('/', Path.DirectorySeparatorChar));
+
+        if (File.Exists(fullPath))
+        {
+            File.Delete(fullPath);
         }
     }
 
@@ -238,6 +307,8 @@ public sealed class PropertyAnalysisEndpointTests
                 1,
                 10,
                 3,
+                null,
+                null,
                 true,
                 true,
                 true,
@@ -268,6 +339,7 @@ public sealed class PropertyAnalysisEndpointTests
                 [],
                 [],
                 [],
+                null,
                 DateTime.UtcNow,
                 DateTime.UtcNow);
         }

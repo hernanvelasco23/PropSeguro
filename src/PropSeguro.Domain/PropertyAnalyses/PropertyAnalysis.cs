@@ -32,6 +32,8 @@ public sealed class PropertyAnalysis
         int? bathrooms,
         int? buildingAgeYears,
         int? floor,
+        string? apartmentUnit,
+        string? unitIdentifier,
         bool? hasBalcony,
         bool? hasAmenities,
         bool? isCreditEligible,
@@ -52,6 +54,8 @@ public sealed class PropertyAnalysis
         Bathrooms = bathrooms;
         BuildingAgeYears = buildingAgeYears;
         Floor = floor;
+        ApartmentUnit = NormalizeOptionalText(apartmentUnit);
+        UnitIdentifier = NormalizeOptionalText(unitIdentifier);
         HasBalcony = hasBalcony;
         HasAmenities = hasAmenities;
         IsCreditEligible = isCreditEligible;
@@ -66,6 +70,7 @@ public sealed class PropertyAnalysis
     }
 
     public Guid Id { get; private set; }
+    public Guid UserId { get; private set; }
     public string Title { get; private set; }
     public string? ListingUrl { get; private set; }
     public string Address { get; private set; }
@@ -79,6 +84,8 @@ public sealed class PropertyAnalysis
     public int? Bathrooms { get; private set; }
     public int? BuildingAgeYears { get; private set; }
     public int? Floor { get; private set; }
+    public string? ApartmentUnit { get; private set; }
+    public string? UnitIdentifier { get; private set; }
     public bool? HasBalcony { get; private set; }
     public bool? HasAmenities { get; private set; }
     public bool? IsCreditEligible { get; private set; }
@@ -122,6 +129,17 @@ public sealed class PropertyAnalysis
         UpdatedAtUtc = DateTime.UtcNow;
 
         return document;
+    }
+
+    public void AssignOwner(Guid userId)
+    {
+        if (userId == Guid.Empty)
+        {
+            throw new ArgumentException("User id is required.", nameof(userId));
+        }
+
+        UserId = userId;
+        UpdatedAtUtc = DateTime.UtcNow;
     }
 
     public void SetCoverImage(string fileName, string contentType, long sizeBytes, string storagePath)
@@ -168,6 +186,8 @@ public sealed class PropertyAnalysis
         int? bathrooms,
         int? buildingAgeYears,
         int? floor,
+        string? apartmentUnit,
+        string? unitIdentifier,
         bool? hasBalcony,
         bool? hasAmenities,
         bool? isCreditEligible,
@@ -187,6 +207,8 @@ public sealed class PropertyAnalysis
         Bathrooms = bathrooms;
         BuildingAgeYears = buildingAgeYears;
         Floor = floor;
+        ApartmentUnit = NormalizeOptionalText(apartmentUnit);
+        UnitIdentifier = NormalizeOptionalText(unitIdentifier);
         HasBalcony = hasBalcony;
         HasAmenities = hasAmenities;
         IsCreditEligible = isCreditEligible;

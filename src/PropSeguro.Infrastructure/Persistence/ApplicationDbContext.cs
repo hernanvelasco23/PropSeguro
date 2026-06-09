@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using PropSeguro.Application.Common;
+using PropSeguro.Domain.BetaAccess;
 using PropSeguro.Domain.PropertyAnalyses;
+using PropSeguro.Domain.Users;
 
 namespace PropSeguro.Infrastructure.Persistence;
 
@@ -11,6 +13,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<PropertyDocument> PropertyDocuments => Set<PropertyDocument>();
     public DbSet<BuyerChecklistItem> BuyerChecklistItems => Set<BuyerChecklistItem>();
     public DbSet<DocumentFinding> DocumentFindings => Set<DocumentFinding>();
+    public DbSet<AppUser> Users => Set<AppUser>();
+    public DbSet<BetaAccessRequest> BetaAccessRequests => Set<BetaAccessRequest>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -19,6 +23,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             builder.ToTable("PropertyAnalyses");
             builder.HasKey(analysis => analysis.Id);
 
+            builder.Property(analysis => analysis.UserId).IsRequired();
             builder.Property(analysis => analysis.Title).HasMaxLength(200).IsRequired();
             builder.Property(analysis => analysis.ListingUrl).HasMaxLength(2048);
             builder.Property(analysis => analysis.Address).HasMaxLength(300).IsRequired();
@@ -32,6 +37,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             builder.Property(analysis => analysis.Bathrooms);
             builder.Property(analysis => analysis.BuildingAgeYears);
             builder.Property(analysis => analysis.Floor);
+            builder.Property(analysis => analysis.ApartmentUnit).HasMaxLength(40);
+            builder.Property(analysis => analysis.UnitIdentifier).HasMaxLength(80);
             builder.Property(analysis => analysis.HasBalcony);
             builder.Property(analysis => analysis.HasAmenities);
             builder.Property(analysis => analysis.IsCreditEligible);
@@ -162,6 +169,35 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             builder.Property(item => item.IsProvided).IsRequired();
             builder.Property(item => item.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
             builder.Property(item => item.CreatedAtUtc).IsRequired();
+        });
+
+        modelBuilder.Entity<AppUser>(builder =>
+        {
+            builder.ToTable("Users");
+            builder.HasKey(user => user.Id);
+            builder.Property(user => user.Email).HasMaxLength(320).IsRequired();
+            builder.Property(user => user.FullName).HasMaxLength(200).IsRequired();
+            builder.Property(user => user.PasswordHash).HasMaxLength(500).IsRequired();
+            builder.Property(user => user.Role).HasConversion<string>().HasMaxLength(40).IsRequired();
+            builder.Property(user => user.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+            builder.Property(user => user.CreatedAtUtc).IsRequired();
+            builder.Property(user => user.LastLoginAtUtc);
+            builder.HasIndex(user => user.Email).IsUnique();
+        });
+
+        modelBuilder.Entity<BetaAccessRequest>(builder =>
+        {
+            builder.ToTable("BetaAccessRequests");
+            builder.HasKey(request => request.Id);
+            builder.Property(request => request.FullName).HasMaxLength(200).IsRequired();
+            builder.Property(request => request.Email).HasMaxLength(320).IsRequired();
+            builder.Property(request => request.Phone).HasMaxLength(80);
+            builder.Property(request => request.IntendedUse).HasMaxLength(500);
+            builder.Property(request => request.Message).HasMaxLength(2000);
+            builder.Property(request => request.CreatedAtUtc).IsRequired();
+            builder.Property(request => request.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+            builder.HasIndex(request => request.Email);
+            builder.HasIndex(request => request.Status);
         });
     }
 }
