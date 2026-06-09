@@ -16,7 +16,6 @@ Prioridad actual:
 Mas adelante:
 
 - Vision analysis.
-- Autenticacion.
 - Pagos.
 
 ## Arquitectura
@@ -36,7 +35,9 @@ Mas adelante:
 - Cargar una imagen principal para reconocer cada propiedad.
 - Subir documentos PDF y guardar texto extraido o editado.
 - Analizar reservas con reglas deterministicas para detectar clausulas riesgosas.
+- Analizar expensas para detectar riesgos del edificio, costos futuros, morosidad, obras y calcular `BuildingHealthScore`.
 - Usar el dashboard para retomar propiedades y completar datos o documentacion mas tarde.
+- Acceder por beta privada con usuarios habilitados por un administrador.
 
 ## Property Dashboard
 
@@ -57,6 +58,15 @@ Cada tarjeta muestra precio, USD/m2, expensas, metros, `OpportunityScore`, `Prot
 
 Endpoints principales:
 
+- `POST /api/auth/login`: inicia sesion y devuelve JWT.
+- `POST /api/beta-access-requests`: registra una solicitud publica de acceso beta.
+- `GET /api/admin/beta-access-requests`: lista solicitudes beta (admin).
+- `POST /api/admin/beta-access-requests/{id}/approve`: aprueba una solicitud y crea/invita usuario (admin).
+- `POST /api/admin/beta-access-requests/{id}/reject`: rechaza una solicitud (admin).
+- `GET /api/admin/users`: lista usuarios (admin).
+- `POST /api/admin/users`: crea un usuario (admin).
+- `PATCH /api/admin/users/{id}/enable`: habilita usuario (admin).
+- `PATCH /api/admin/users/{id}/disable`: deshabilita usuario (admin).
 - `POST /api/property-analyses`: crea un analisis.
 - `GET /api/property-analyses`: lista resumenes para el dashboard.
 - `GET /api/property-analyses/{id}`: obtiene el detalle completo.
@@ -85,6 +95,27 @@ npm run dev
 ```
 
 El frontend usa `VITE_API_BASE_URL`; ver `frontend/propseguro-web/.env.example`.
+
+## Beta privada y login
+
+En Development se puede seedear un administrador desde:
+
+```json
+"SeedAdmin": {
+  "Email": "admin@propsegura.local",
+  "FullName": "Admin PropSegura",
+  "Password": "Admin123!"
+}
+```
+
+El frontend expone:
+
+- `/login`: ingreso de usuarios habilitados.
+- `/solicitar-acceso`: solicitud publica de acceso beta.
+- `/admin`: gestion de solicitudes y usuarios para administradores.
+- `/properties`, `/properties/new` y `/properties/{id}`: rutas protegidas.
+
+El token JWT se guarda en `localStorage` del navegador para desarrollo local.
 
 ## Base de datos
 
@@ -123,7 +154,7 @@ npm run build
 
 ## Notas de producto
 
-- No hay autenticacion ni pagos.
+- Hay autenticacion basica para beta privada; no hay pagos.
 - Hay una imagen principal por propiedad solo para identificacion visual.
 - No hay galeria, analisis de imagenes ni vision artificial.
 - La logica actual es deterministica.

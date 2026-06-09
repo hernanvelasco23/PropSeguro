@@ -115,7 +115,8 @@ public enum FindingCategory
     Operational = 3,
     Documentation = 4,
     Transparency = 5,
-    Negotiation = 6
+    Negotiation = 6,
+    Building = 7
 }
 
 public enum ChecklistStatus

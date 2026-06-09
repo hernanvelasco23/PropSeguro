@@ -11,18 +11,26 @@ public sealed record UploadPropertyCoverImageCommand(
     long SizeBytes,
     string StoragePath) : IRequest<PropertyAnalysisDto?>;
 
-public sealed class UploadPropertyCoverImageCommandHandler(IApplicationDbContext dbContext)
-    : IRequestHandler<UploadPropertyCoverImageCommand, PropertyAnalysisDto?>
+public sealed class UploadPropertyCoverImageCommandHandler : IRequestHandler<UploadPropertyCoverImageCommand, PropertyAnalysisDto?>
 {
+    private readonly IApplicationDbContext _dbContext;
+    private readonly ICurrentUserContext? _currentUser;
+
+    public UploadPropertyCoverImageCommandHandler(IApplicationDbContext dbContext, ICurrentUserContext? currentUser = null)
+    {
+        _dbContext = dbContext;
+        _currentUser = currentUser;
+    }
+
     public async Task<PropertyAnalysisDto?> Handle(UploadPropertyCoverImageCommand request, CancellationToken cancellationToken)
     {
-        var analysis = await dbContext.PropertyAnalyses
+        var analysis = await _dbContext.PropertyAnalyses
             .Include(item => item.Documents)
             .Include(item => item.RiskFindings)
             .Include(item => item.ChecklistItems)
             .FirstOrDefaultAsync(item => item.Id == request.PropertyAnalysisId, cancellationToken);
 
-        if (analysis is null)
+        if (analysis is null || !_currentUser.CanAccess(analysis))
         {
             return null;
         }
@@ -33,11 +41,11 @@ public sealed class UploadPropertyCoverImageCommandHandler(IApplicationDbContext
             request.SizeBytes,
             request.StoragePath);
 
-        var documentFindings = await dbContext.DocumentFindings
+        var documentFindings = await _dbContext.DocumentFindings
             .Where(item => item.PropertyAnalysisId == request.PropertyAnalysisId)
             .ToListAsync(cancellationToken);
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return analysis.ToDto(documentFindings);
     }

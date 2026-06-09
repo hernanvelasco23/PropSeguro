@@ -2,13 +2,31 @@ using PropSeguro.Domain.PropertyAnalyses;
 
 namespace PropSeguro.Application.Common;
 
-public sealed class DeterministicDocumentIntelligenceAnalyzer : IDocumentIntelligenceAnalyzer
+public sealed class DeterministicDocumentIntelligenceAnalyzer(IExpenseIntelligenceAnalyzer? expenseIntelligenceAnalyzer = null) : IDocumentIntelligenceAnalyzer
 {
+    private readonly IExpenseIntelligenceAnalyzer _expenseIntelligenceAnalyzer =
+        expenseIntelligenceAnalyzer ?? new DeterministicExpenseIntelligenceAnalyzer();
+
     public Task<DocumentIntelligenceAnalysis> AnalyzeAsync(
         PropertyDocument document,
         string? text,
         CancellationToken cancellationToken = default)
     {
+        if (document.DocumentType == DocumentType.Expenses)
+        {
+            var expenseAnalysis = _expenseIntelligenceAnalyzer.Analyze(document, text);
+            var expenseResult = new DocumentIntelligenceAnalysis(
+                document.DocumentType.ToString(),
+                BuildRiskLevel(expenseAnalysis.Findings),
+                expenseAnalysis.Summary,
+                expenseAnalysis.Findings,
+                expenseAnalysis.SuggestedQuestions,
+                expenseAnalysis.SuggestedNegotiationPoints,
+                expenseAnalysis);
+
+            return Task.FromResult(expenseResult);
+        }
+
         var findings = DocumentAnalysisRuleEngine.Analyze(document, text);
         var result = new DocumentIntelligenceAnalysis(
             document.DocumentType.ToString(),

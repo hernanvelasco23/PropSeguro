@@ -9,6 +9,7 @@ public static class DependencyInjection
     {
         services.AddMediatR(configuration =>
             configuration.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly));
+        services.AddScoped<IExpenseIntelligenceAnalyzer, DeterministicExpenseIntelligenceAnalyzer>();
         services.AddScoped<IDocumentIntelligenceAnalyzer, DeterministicDocumentIntelligenceAnalyzer>();
 
         return services;

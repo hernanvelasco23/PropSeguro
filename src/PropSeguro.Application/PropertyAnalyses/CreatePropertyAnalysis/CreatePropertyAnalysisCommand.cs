@@ -19,15 +19,25 @@ public sealed record CreatePropertyAnalysisCommand(
     int? Bathrooms,
     int? BuildingAgeYears,
     int? Floor,
+    string? ApartmentUnit,
+    string? UnitIdentifier,
     bool? HasBalcony,
     bool? HasAmenities,
     bool? IsCreditEligible,
     PropertyCondition? PropertyCondition,
     string? Notes) : IRequest<PropertyAnalysisDto>;
 
-public sealed class CreatePropertyAnalysisCommandHandler(IApplicationDbContext dbContext)
-    : IRequestHandler<CreatePropertyAnalysisCommand, PropertyAnalysisDto>
+public sealed class CreatePropertyAnalysisCommandHandler : IRequestHandler<CreatePropertyAnalysisCommand, PropertyAnalysisDto>
 {
+    private readonly IApplicationDbContext _dbContext;
+    private readonly ICurrentUserContext? _currentUser;
+
+    public CreatePropertyAnalysisCommandHandler(IApplicationDbContext dbContext, ICurrentUserContext? currentUser = null)
+    {
+        _dbContext = dbContext;
+        _currentUser = currentUser;
+    }
+
     public async Task<PropertyAnalysisDto> Handle(CreatePropertyAnalysisCommand request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Title))
@@ -59,16 +69,23 @@ public sealed class CreatePropertyAnalysisCommandHandler(IApplicationDbContext d
             request.Bathrooms,
             request.BuildingAgeYears,
             request.Floor,
+            request.ApartmentUnit,
+            request.UnitIdentifier,
             request.HasBalcony,
             request.HasAmenities,
             request.IsCreditEligible,
             request.PropertyCondition,
             request.Notes);
 
+        if (_currentUser?.UserId is { } userId)
+        {
+            analysis.AssignOwner(userId);
+        }
+
         analysis.RunInitialAnalysis();
 
-        dbContext.PropertyAnalyses.Add(analysis);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        _dbContext.PropertyAnalyses.Add(analysis);
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return analysis.ToDto();
     }

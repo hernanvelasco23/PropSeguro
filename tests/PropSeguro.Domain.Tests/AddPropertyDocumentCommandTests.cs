@@ -122,6 +122,8 @@ public sealed class AddPropertyDocumentCommandTests
             1,
             12,
             8,
+            null,
+            null,
             true,
             true,
             true,

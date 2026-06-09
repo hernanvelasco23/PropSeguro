@@ -252,83 +252,50 @@ public static class DocumentAnalysisRuleEngine
             findings,
             document,
             normalizedText,
-            ["expensas extraordinarias", "extraordinaria", "derrame"],
-            FindingSeverity.Medium,
-            FindingCategory.Financial,
-            "Expensas extraordinarias o derrame",
-            "El texto menciona expensas extraordinarias o derrames. Pueden indicar costos adicionales por fuera de la expensa ordinaria.",
-            "Que monto extraordinario queda pendiente y hasta cuando se paga?",
-            "Pedir detalle de saldos, cuotas pendientes y dejar aclarado quien asume esos importes antes de la posesion.");
-
-        AddIfContains(
-            findings,
-            document,
-            normalizedText,
-            "fondo de reserva",
-            FindingSeverity.Low,
-            FindingCategory.Financial,
-            "Fondo de reserva mencionado",
-            "El texto menciona fondo de reserva. Puede ser una senal de obras previstas o de necesidad de cubrir gastos del consorcio.",
-            "Para que se esta usando el fondo de reserva y si hay aumentos previstos?",
-            "Solicitar liquidaciones recientes y actas que expliquen destino, saldo y proyeccion del fondo.");
-
-        AddIfContainsAny(
-            findings,
-            document,
-            normalizedText,
-            ["deuda", "moroso", "morosidad"],
+            ["extraordinaria", "extraordinarias", "derrame", "derramas"],
             FindingSeverity.High,
             FindingCategory.Financial,
-            "Deuda o morosidad detectada",
-            "El texto menciona deuda, morosos o morosidad. Conviene pedir detalle actualizado para entender si afecta al consorcio o a la unidad.",
-            "La unidad esta libre de deuda de expensas y existe morosidad relevante en el edificio?",
-            "Exigir libre deuda de expensas y aclarar que toda deuda anterior queda a cargo del vendedor.");
+            "Expensas extraordinarias detectadas",
+            "El documento menciona expensas extraordinarias o derramas.",
+            "Las extraordinarias ya fueron cobradas o quedan cuotas pendientes?",
+            "Solicitar que cualquier saldo pendiente sea asumido por el vendedor.",
+            "Podrias afrontar gastos adicionales luego de comprar.");
 
         AddIfContainsAny(
             findings,
             document,
             normalizedText,
-            ["juicio", "demanda"],
+            ["ascensor", "elevador"],
+            FindingSeverity.Medium,
+            FindingCategory.Building,
+            "Referencia a ascensor",
+            "El documento menciona ascensor o elevador. Puede anticipar mantenimiento, reparaciones o adecuaciones futuras.",
+            "Hay reparaciones, modernizaciones o presupuestos pendientes sobre ascensores?",
+            "Pedir actas, presupuestos y estado tecnico del ascensor antes de cerrar precio.",
+            "Podrias heredar costos futuros de mantenimiento o adecuacion.");
+
+        AddIfContainsAny(
+            findings,
+            document,
+            normalizedText,
+            ["humedad", "filtracion", "filtraciones", "gotera", "goteras"],
             FindingSeverity.High,
-            FindingCategory.Legal,
-            "Riesgo legal detectado",
-            "El texto menciona juicio o demanda vinculada al inmueble, consorcio o administracion.",
-            "Cual es el estado del juicio o demanda y que costo potencial puede generar?",
-            "Pedir documentacion respaldatoria y reservar derecho a revisar el impacto antes de avanzar.");
-
-        AddIfContains(
-            findings,
-            document,
-            normalizedText,
-            "ascensor",
-            FindingSeverity.Medium,
-            FindingCategory.Operational,
-            "Mantenimiento de ascensor",
-            "El texto menciona ascensor. Puede implicar mantenimiento, reparaciones o gastos extraordinarios.",
-            "Hay reparaciones, adecuaciones o presupuestos pendientes sobre ascensores?",
-            "Pedir actas y presupuestos vinculados al ascensor antes de cerrar precio.");
-
-        AddIfContainsAny(
-            findings,
-            document,
-            normalizedText,
-            ["filtracion", "humedad"],
-            FindingSeverity.Medium,
-            FindingCategory.Operational,
+            FindingCategory.Building,
             "Humedad o filtracion detectada",
-            "El texto menciona humedad o filtracion. Puede anticipar reparaciones, reclamos o problemas estructurales.",
+            "El documento menciona humedad, filtraciones o goteras. Puede anticipar reparaciones, reclamos o problemas edilicios.",
             "La humedad o filtracion afecta a la unidad, partes comunes o unidades vecinas?",
-            "Condicionar avance a inspeccion y aclaracion de responsabilidad y costos de reparacion.");
+            "Condicionar avance a inspeccion y aclaracion de responsabilidad y costos de reparacion.",
+            "Podrias heredar reparaciones o reclamos vinculados al estado del edificio.");
 
         AddIfContainsAny(
             findings,
             document,
             normalizedText,
-            ["obra", "reparacion"],
+            ["obra", "obras", "reparacion", "reparaciones", "impermeabilizacion", "pintura", "fachada"],
             FindingSeverity.Medium,
-            FindingCategory.Operational,
+            FindingCategory.Building,
             "Obras o reparaciones mencionadas",
-            "El texto menciona obras o reparaciones. Pueden impactar expensas futuras, tiempos y uso del edificio.",
+            "El documento menciona obras, reparaciones, impermeabilizacion, pintura o fachada. Pueden impactar expensas futuras, tiempos y uso del edificio.",
             "Que obras estan aprobadas, cuanto cuestan y como se financian?",
             "Solicitar cronograma, presupuesto y cuotas pendientes antes de negociar precio.");
 
@@ -336,13 +303,49 @@ public static class DocumentAnalysisRuleEngine
             findings,
             document,
             normalizedText,
-            ["administracion", "seguro", "encargado"],
-            FindingSeverity.Info,
-            FindingCategory.Transparency,
-            "Costos operativos del consorcio",
-            "El texto menciona administracion, seguro o encargado. Sirve para revisar composicion y tendencia de expensas.",
-            "Hubo aumentos recientes o previstos en administracion, seguro o encargado?",
+            ["juicio", "demanda", "litigio", "reclamo judicial"],
+            FindingSeverity.High,
+            FindingCategory.Legal,
+            "Juicio o reclamo judicial detectado",
+            "El documento menciona juicio, demanda, litigio o reclamo judicial vinculado al consorcio o administracion.",
+            "Cual es el estado del reclamo judicial y que costo potencial puede generar?",
+            "Pedir documentacion respaldatoria y reservar derecho a revisar el impacto antes de avanzar.");
+
+        AddIfContainsAny(
+            findings,
+            document,
+            normalizedText,
+            ["moroso", "morosos", "morosidad", "deuda"],
+            FindingSeverity.Medium,
+            FindingCategory.Financial,
+            "Morosidad o deuda detectada",
+            "El documento menciona deuda, morosos o morosidad. Conviene pedir detalle actualizado para entender si afecta al consorcio o a la unidad.",
+            "La unidad esta libre de deuda de expensas y existe morosidad relevante en el edificio?",
+            "Exigir libre deuda de expensas y aclarar que toda deuda anterior queda a cargo del vendedor.");
+
+        AddIfContainsAny(
+            findings,
+            document,
+            normalizedText,
+            ["encargado", "personal", "sueldo"],
+            FindingSeverity.Low,
+            FindingCategory.Operational,
+            "Costos de personal del edificio",
+            "El documento menciona encargado, personal o sueldos. Es un costo operativo relevante en la composicion de expensas.",
+            "Hubo aumentos recientes o previstos en personal del edificio?",
             "Comparar liquidaciones de varios meses para entender si las expensas son estables.");
+
+        AddIfContains(
+            findings,
+            document,
+            normalizedText,
+            "fondo de reserva",
+            FindingSeverity.Info,
+            FindingCategory.Financial,
+            "Fondo de reserva mencionado",
+            "El documento menciona fondo de reserva. Sirve para entender si el consorcio tiene respaldo o si esta juntando dinero para gastos futuros.",
+            "Para que se esta usando el fondo de reserva y hay aumentos previstos?",
+            "Solicitar liquidaciones recientes y actas que expliquen destino, saldo y proyeccion del fondo.");
     }
 
     private static void AddIfContains(
@@ -355,7 +358,8 @@ public static class DocumentAnalysisRuleEngine
         string title,
         string description,
         string? suggestedQuestion = null,
-        string? suggestedChange = null)
+        string? suggestedChange = null,
+        string? buyerImpact = null)
     {
         if (normalizedText.Contains(Normalize(needle), StringComparison.Ordinal))
         {
@@ -368,7 +372,7 @@ public static class DocumentAnalysisRuleEngine
                 description,
                 suggestedQuestion,
                 suggestedChange,
-                BuildBuyerImpact(severity, category),
+                buyerImpact ?? BuildBuyerImpact(severity, category),
                 suggestedChange,
                 needle));
         }
@@ -384,7 +388,8 @@ public static class DocumentAnalysisRuleEngine
         string title,
         string description,
         string? suggestedQuestion = null,
-        string? suggestedChange = null)
+        string? suggestedChange = null,
+        string? buyerImpact = null)
     {
         var matchedNeedle = needles.FirstOrDefault(needle => normalizedText.Contains(Normalize(needle), StringComparison.Ordinal));
 
@@ -399,7 +404,7 @@ public static class DocumentAnalysisRuleEngine
                 description,
                 suggestedQuestion,
                 suggestedChange,
-                BuildBuyerImpact(severity, category),
+                buyerImpact ?? BuildBuyerImpact(severity, category),
                 suggestedChange,
                 matchedNeedle));
         }
@@ -443,6 +448,7 @@ public static class DocumentAnalysisRuleEngine
                 FindingCategory.Legal => "Podrias quedar obligado por una condicion legal desfavorable o dificil de reclamar.",
                 FindingCategory.Documentation => "Podrias avanzar sin documentacion suficiente para validar la operacion.",
                 FindingCategory.Operational => "Podrias comprar con problemas de mantenimiento o reparaciones pendientes.",
+                FindingCategory.Building => "Podrias heredar costos futuros o problemas edilicios del edificio.",
                 _ => "Podria afectar tu decision de avanzar, negociar o frenar la operacion."
             };
         }

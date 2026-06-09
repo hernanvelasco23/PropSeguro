@@ -1,3 +1,4 @@
+using PropSeguro.Application.Common;
 using PropSeguro.Domain.PropertyAnalyses;
 
 namespace PropSeguro.Application.PropertyAnalyses;
@@ -17,6 +18,8 @@ public sealed record PropertyAnalysisDto(
     int? Bathrooms,
     int? BuildingAgeYears,
     int? Floor,
+    string? ApartmentUnit,
+    string? UnitIdentifier,
     bool? HasBalcony,
     bool? HasAmenities,
     bool? IsCreditEligible,
@@ -47,6 +50,7 @@ public sealed record PropertyAnalysisDto(
     IReadOnlyCollection<PropertyDocumentDto> Documents,
     IReadOnlyCollection<BuyerChecklistItemDto> ChecklistItems,
     IReadOnlyCollection<DocumentFindingDto> DocumentFindings,
+    ExpenseIntelligenceAnalysisDto? ExpenseIntelligence,
     DateTime CreatedAtUtc,
     DateTime UpdatedAtUtc);
 
@@ -100,6 +104,8 @@ public sealed record DocumentAnalysisResultDto(
     IReadOnlyCollection<DocumentFindingDto> Findings,
     IReadOnlyCollection<string> SuggestedQuestions,
     IReadOnlyCollection<string> SuggestedNegotiationPoints,
+    ExpenseIntelligenceAnalysisDto? ExpenseIntelligence,
+    ExpenseDocumentValidationDto? ExpenseValidation,
     string BuyerFriendlyExplanation,
     int CurrentProtectionScore);
 
@@ -137,7 +143,8 @@ public sealed record PropertyDocumentDto(
     string Status,
     string AnalysisStatus,
     DateTime? AnalyzedAtUtc,
-    string? AnalysisSummary);
+    string? AnalysisSummary,
+    ExpenseDocumentValidationDto? ExpenseValidation);
 
 public sealed record DocumentFindingDto(
     Guid Id,
@@ -152,6 +159,25 @@ public sealed record DocumentFindingDto(
     string? SuggestedNegotiationPoint,
     string? MatchedText,
     DateTime CreatedAtUtc);
+
+public sealed record ExpenseIntelligenceAnalysisDto(
+    int BuildingHealthScore,
+    string Classification,
+    string Summary,
+    IReadOnlyCollection<DocumentFindingDto> Findings,
+    IReadOnlyCollection<string> SuggestedQuestions,
+    IReadOnlyCollection<string> SuggestedNegotiationPoints);
+
+public sealed record ExpenseDocumentValidationDto(
+    int? DetectedFloor,
+    string? DetectedApartmentUnit,
+    string? DetectedUnitIdentifier,
+    decimal? DetectedExpenseAmount,
+    string ExtractionConfidence,
+    int ConfidenceScore,
+    string Classification,
+    string Label,
+    string Explanation);
 
 public static class PropertyAnalysisMapping
 {
@@ -177,6 +203,8 @@ public static class PropertyAnalysisMapping
             analysis.Bathrooms,
             analysis.BuildingAgeYears,
             analysis.Floor,
+            analysis.ApartmentUnit,
+            analysis.UnitIdentifier,
             analysis.HasBalcony,
             analysis.HasAmenities,
             analysis.IsCreditEligible,
@@ -232,7 +260,13 @@ public static class PropertyAnalysisMapping
                     document.Status.ToString(),
                     document.AnalysisStatus.ToString(),
                     document.AnalyzedAtUtc,
-                    document.AnalysisSummary))
+                    document.AnalysisSummary,
+                    document.DocumentType == DocumentType.Expenses
+                        ? ExpenseDocumentValidator.Validate(
+                            analysis,
+                            document,
+                            document.EditedText ?? document.ExtractedText).ToDto()
+                        : null))
                 .ToArray(),
             analysis.ChecklistItems
                 .OrderBy(item => item.DocumentType)
@@ -246,6 +280,7 @@ public static class PropertyAnalysisMapping
                     item.Status.ToString()))
                 .ToArray(),
             findingDtos,
+            analysis.ToExpenseIntelligenceAnalysisDto(documentFindings ?? []),
             analysis.CreatedAtUtc,
             analysis.UpdatedAtUtc);
     }
@@ -300,5 +335,90 @@ public static class PropertyAnalysisMapping
         return string.IsNullOrWhiteSpace(analysis.CoverImageStoragePath)
             ? null
             : $"/api/property-analyses/{analysis.Id:D}/cover-image";
+    }
+
+    public static ExpenseIntelligenceAnalysisDto? ToExpenseIntelligenceAnalysisDto(
+        this PropertyAnalysis analysis,
+        IEnumerable<DocumentFinding> documentFindings)
+    {
+        var expenseDocumentIds = analysis.Documents
+            .Where(document => document.DocumentType == DocumentType.Expenses)
+            .Select(document => document.Id)
+            .ToHashSet();
+
+        if (expenseDocumentIds.Count == 0)
+        {
+            return null;
+        }
+
+        var expenseFindings = documentFindings
+            .Where(finding => expenseDocumentIds.Contains(finding.PropertyDocumentId))
+            .Where(finding => finding.Category != FindingCategory.Documentation)
+            .OrderByDescending(finding => finding.Severity)
+            .ToArray();
+        var score = DeterministicExpenseIntelligenceAnalyzer.CalculateBuildingHealthScore(expenseFindings);
+
+        return new ExpenseIntelligenceAnalysisDto(
+            score,
+            DeterministicExpenseIntelligenceAnalyzer.Classify(score),
+            BuildExpenseSummary(expenseFindings),
+            expenseFindings.Select(finding => finding.ToDto()).ToArray(),
+            expenseFindings
+                .Select(finding => finding.SuggestedQuestion)
+                .OfType<string>()
+                .Where(question => !string.IsNullOrWhiteSpace(question))
+                .Distinct()
+                .ToArray(),
+            expenseFindings
+                .Select(finding => finding.SuggestedNegotiationPoint ?? finding.SuggestedChange)
+                .OfType<string>()
+                .Where(point => !string.IsNullOrWhiteSpace(point))
+                .Distinct()
+                .ToArray());
+    }
+
+    public static ExpenseIntelligenceAnalysisDto? ToDto(this ExpenseIntelligenceAnalysis? analysis)
+    {
+        if (analysis is null)
+        {
+            return null;
+        }
+
+        return new ExpenseIntelligenceAnalysisDto(
+            analysis.BuildingHealthScore,
+            analysis.Classification,
+            analysis.Summary,
+            analysis.Findings.Select(finding => finding.ToDto()).ToArray(),
+            analysis.SuggestedQuestions,
+            analysis.SuggestedNegotiationPoints);
+    }
+
+    public static ExpenseDocumentValidationDto? ToDto(this ExpenseDocumentValidation? validation)
+    {
+        if (validation is null)
+        {
+            return null;
+        }
+
+        return new ExpenseDocumentValidationDto(
+            validation.Extraction.DetectedFloor,
+            validation.Extraction.DetectedApartmentUnit,
+            validation.Extraction.DetectedUnitIdentifier,
+            validation.Extraction.DetectedExpenseAmount,
+            validation.Extraction.Confidence,
+            validation.ConfidenceScore,
+            validation.Classification,
+            validation.Label,
+            validation.Explanation);
+    }
+
+    private static string BuildExpenseSummary(IReadOnlyCollection<DocumentFinding> findings)
+    {
+        if (findings.Count == 0)
+        {
+            return "No se detectaron senales relevantes en las expensas con las reglas actuales.";
+        }
+
+        return $"Se detectaron {findings.Count} senal(es) en expensas para preguntar o negociar antes de avanzar.";
     }
 }

@@ -13,7 +13,11 @@ public sealed class DocumentAnalysisRuleEngineTests
 
         Assert.Contains(findings, finding =>
             finding.Category == FindingCategory.Financial &&
-            finding.Severity == FindingSeverity.Medium);
+            finding.Severity == FindingSeverity.High &&
+            finding.Title == "Expensas extraordinarias detectadas" &&
+            finding.BuyerImpact is not null &&
+            finding.SuggestedQuestion is not null &&
+            finding.SuggestedNegotiationPoint is not null);
     }
 
     [Fact]
@@ -25,8 +29,8 @@ public sealed class DocumentAnalysisRuleEngineTests
 
         Assert.Contains(findings, finding =>
             finding.Category == FindingCategory.Financial &&
-            finding.Severity == FindingSeverity.High &&
-            finding.Title == "Deuda o morosidad detectada" &&
+            finding.Severity == FindingSeverity.Medium &&
+            finding.Title == "Morosidad o deuda detectada" &&
             finding.BuyerImpact is not null);
     }
 
@@ -38,9 +42,61 @@ public sealed class DocumentAnalysisRuleEngineTests
         var findings = DocumentAnalysisRuleEngine.Analyze(document, "Se detecta humedad y filtracion en partes comunes.");
 
         Assert.Contains(findings, finding =>
-            finding.Category == FindingCategory.Operational &&
-            finding.Severity == FindingSeverity.Medium &&
+            finding.Category == FindingCategory.Building &&
+            finding.Severity == FindingSeverity.High &&
             finding.MatchedText is not null);
+    }
+
+    [Fact]
+    public void Expenses_with_lawsuit_creates_high_legal_finding()
+    {
+        var document = CreateDocument(DocumentType.Expenses);
+
+        var findings = DocumentAnalysisRuleEngine.Analyze(document, "Existe juicio iniciado por reclamo judicial contra el consorcio.");
+
+        Assert.Contains(findings, finding =>
+            finding.Category == FindingCategory.Legal &&
+            finding.Severity == FindingSeverity.High &&
+            finding.Title == "Juicio o reclamo judicial detectado");
+    }
+
+    [Fact]
+    public void Expenses_with_building_works_creates_medium_building_finding()
+    {
+        var document = CreateDocument(DocumentType.Expenses);
+
+        var findings = DocumentAnalysisRuleEngine.Analyze(document, "Se aprueba obra de impermeabilizacion y pintura de fachada.");
+
+        Assert.Contains(findings, finding =>
+            finding.Category == FindingCategory.Building &&
+            finding.Severity == FindingSeverity.Medium &&
+            finding.Title == "Obras o reparaciones mencionadas");
+    }
+
+    [Fact]
+    public void Expenses_with_elevator_reference_creates_medium_building_finding()
+    {
+        var document = CreateDocument(DocumentType.Expenses);
+
+        var findings = DocumentAnalysisRuleEngine.Analyze(document, "Mantenimiento de ascensor y elevador principal.");
+
+        Assert.Contains(findings, finding =>
+            finding.Category == FindingCategory.Building &&
+            finding.Severity == FindingSeverity.Medium &&
+            finding.Title == "Referencia a ascensor");
+    }
+
+    [Fact]
+    public void Expenses_with_staff_reference_creates_low_operational_finding()
+    {
+        var document = CreateDocument(DocumentType.Expenses);
+
+        var findings = DocumentAnalysisRuleEngine.Analyze(document, "Sueldo del encargado y cargas del personal.");
+
+        Assert.Contains(findings, finding =>
+            finding.Category == FindingCategory.Operational &&
+            finding.Severity == FindingSeverity.Low &&
+            finding.Title == "Costos de personal del edificio");
     }
 
     [Fact]

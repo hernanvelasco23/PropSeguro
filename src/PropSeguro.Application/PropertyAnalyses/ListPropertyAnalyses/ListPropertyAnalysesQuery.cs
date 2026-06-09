@@ -7,19 +7,34 @@ namespace PropSeguro.Application.PropertyAnalyses.ListPropertyAnalyses;
 
 public sealed record ListPropertyAnalysesQuery : IRequest<IReadOnlyCollection<PropertyAnalysisSummaryDto>>;
 
-public sealed class ListPropertyAnalysesQueryHandler(IApplicationDbContext dbContext)
-    : IRequestHandler<ListPropertyAnalysesQuery, IReadOnlyCollection<PropertyAnalysisSummaryDto>>
+public sealed class ListPropertyAnalysesQueryHandler : IRequestHandler<ListPropertyAnalysesQuery, IReadOnlyCollection<PropertyAnalysisSummaryDto>>
 {
+    private readonly IApplicationDbContext _dbContext;
+    private readonly ICurrentUserContext? _currentUser;
+
+    public ListPropertyAnalysesQueryHandler(IApplicationDbContext dbContext, ICurrentUserContext? currentUser = null)
+    {
+        _dbContext = dbContext;
+        _currentUser = currentUser;
+    }
+
     public async Task<IReadOnlyCollection<PropertyAnalysisSummaryDto>> Handle(ListPropertyAnalysesQuery request, CancellationToken cancellationToken)
     {
-        var analyses = await dbContext.PropertyAnalyses
+        var query = _dbContext.PropertyAnalyses
             .Include(item => item.ChecklistItems)
-            .AsNoTracking()
+            .AsNoTracking();
+
+        if (_currentUser?.UserId is { } userId && !_currentUser.IsAdmin)
+        {
+            query = query.Where(item => item.UserId == userId);
+        }
+
+        var analyses = await query
             .OrderByDescending(item => item.UpdatedAtUtc)
             .ToListAsync(cancellationToken);
 
         var analysisIds = analyses.Select(item => item.Id).ToArray();
-        var findings = await dbContext.DocumentFindings
+        var findings = await _dbContext.DocumentFindings
             .Where(item => analysisIds.Contains(item.PropertyAnalysisId))
             .AsNoTracking()
             .ToListAsync(cancellationToken);

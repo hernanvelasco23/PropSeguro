@@ -16,4 +16,5 @@ public sealed record DocumentIntelligenceAnalysis(
     string Summary,
     IReadOnlyCollection<DocumentFinding> Findings,
     IReadOnlyCollection<string> SuggestedQuestions,
-    IReadOnlyCollection<string> SuggestedNegotiationPoints);
+    IReadOnlyCollection<string> SuggestedNegotiationPoints,
+    ExpenseIntelligenceAnalysis? ExpenseIntelligence = null);

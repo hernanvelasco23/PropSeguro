@@ -21,6 +21,8 @@ export type CreateAnalysisRequest = {
   bathrooms?: number | null;
   buildingAgeYears?: number | null;
   floor?: number | null;
+  apartmentUnit?: string | null;
+  unitIdentifier?: string | null;
   hasBalcony?: boolean | null;
   hasAmenities?: boolean | null;
   isCreditEligible?: boolean | null;
@@ -67,6 +69,61 @@ export type ListingImportResult = {
   warnings: string[];
 };
 
+export type UserRole = 'Admin' | 'User';
+export type UserStatus = 'Invited' | 'Active' | 'Disabled';
+
+export type AuthUser = {
+  id: string;
+  email: string;
+  fullName: string;
+  role: UserRole;
+  status: UserStatus;
+  createdAtUtc: string;
+  lastLoginAtUtc?: string | null;
+};
+
+export type LoginResponse = {
+  token: string;
+  user: AuthUser;
+};
+
+export type BetaAccessRequest = {
+  id: string;
+  email: string;
+  fullName: string;
+  phone?: string | null;
+  intendedUse?: string | null;
+  message?: string | null;
+  status: 'Pending' | 'Approved' | 'Rejected';
+  createdAtUtc: string;
+};
+
+export type CreatedBetaAccessRequest = {
+  id: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+};
+
+export type ApproveBetaAccessResponse = {
+  request: BetaAccessRequest;
+  user: AuthUser;
+  temporaryPassword?: string | null;
+};
+
+export type CreateBetaAccessRequest = {
+  email: string;
+  fullName: string;
+  phone?: string | null;
+  intendedUse?: string | null;
+  message?: string | null;
+};
+
+export type CreateUserRequest = {
+  email: string;
+  fullName: string;
+  password: string;
+  role: UserRole;
+};
+
 export type RiskFinding = {
   id: string;
   type: string;
@@ -104,6 +161,7 @@ export type PropertyDocument = {
   analysisStatus: string;
   analyzedAtUtc?: string | null;
   analysisSummary?: string | null;
+  expenseValidation?: ExpenseDocumentValidation | null;
 };
 
 export type DocumentFinding = {
@@ -134,6 +192,27 @@ export type NegotiationAnalysis = {
   explanation: string;
 };
 
+export type ExpenseIntelligenceAnalysis = {
+  buildingHealthScore: number;
+  classification: string;
+  summary: string;
+  findings: DocumentFinding[];
+  suggestedQuestions: string[];
+  suggestedNegotiationPoints: string[];
+};
+
+export type ExpenseDocumentValidation = {
+  detectedFloor?: number | null;
+  detectedApartmentUnit?: string | null;
+  detectedUnitIdentifier?: string | null;
+  detectedExpenseAmount?: number | null;
+  extractionConfidence: string;
+  confidenceScore: number;
+  classification: 'Validated' | 'PartiallyValidated' | 'NotValidated' | 'Mismatch';
+  label: string;
+  explanation: string;
+};
+
 export type PropertyAnalysis = {
   id: string;
   title: string;
@@ -149,6 +228,8 @@ export type PropertyAnalysis = {
   bathrooms?: number | null;
   buildingAgeYears?: number | null;
   floor?: number | null;
+  apartmentUnit?: string | null;
+  unitIdentifier?: string | null;
   hasBalcony?: boolean | null;
   hasAmenities?: boolean | null;
   isCreditEligible?: boolean | null;
@@ -179,6 +260,7 @@ export type PropertyAnalysis = {
   documents: PropertyDocument[];
   checklistItems: ChecklistItem[];
   documentFindings: DocumentFinding[];
+  expenseIntelligence?: ExpenseIntelligenceAnalysis | null;
   createdAtUtc: string;
   updatedAtUtc: string;
 };
@@ -207,6 +289,37 @@ export type PropertyAnalysisSummary = {
 };
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5288').replace(/\/$/, '');
+const AUTH_TOKEN_KEY = 'propsegura.authToken';
+const AUTH_USER_KEY = 'propsegura.authUser';
+
+export function getStoredAuthToken() {
+  return window.localStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+export function getStoredAuthUser(): AuthUser | null {
+  const stored = window.localStorage.getItem(AUTH_USER_KEY);
+
+  if (!stored) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(stored) as AuthUser;
+  } catch {
+    clearStoredAuth();
+    return null;
+  }
+}
+
+export function storeAuthSession(session: LoginResponse) {
+  window.localStorage.setItem(AUTH_TOKEN_KEY, session.token);
+  window.localStorage.setItem(AUTH_USER_KEY, JSON.stringify(session.user));
+}
+
+export function clearStoredAuth() {
+  window.localStorage.removeItem(AUTH_TOKEN_KEY);
+  window.localStorage.removeItem(AUTH_USER_KEY);
+}
 
 export function resolveApiUrl(path?: string | null) {
   if (!path) {
@@ -222,14 +335,20 @@ export function resolveApiUrl(path?: string | null) {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isMultipart = init?.body instanceof FormData;
+  const token = getStoredAuthToken();
+  const headers = new Headers(init?.headers);
+
+  if (!isMultipart && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: isMultipart
-      ? init?.headers
-      : {
-          'Content-Type': 'application/json',
-          ...(init?.headers ?? {})
-        },
-    ...init
+    ...init,
+    headers,
   });
 
   if (!response.ok) {
@@ -242,6 +361,59 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+export function login(email: string, password: string) {
+  return request<LoginResponse>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password })
+  });
+}
+
+export function createBetaAccessRequest(payload: CreateBetaAccessRequest) {
+  return request<CreatedBetaAccessRequest>('/api/beta-access-requests', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function listBetaAccessRequests() {
+  return request<BetaAccessRequest[]>('/api/admin/beta-access-requests');
+}
+
+export function approveBetaAccessRequest(id: string) {
+  return request<ApproveBetaAccessResponse>(`/api/admin/beta-access-requests/${id}/approve`, {
+    method: 'POST'
+  });
+}
+
+export function rejectBetaAccessRequest(id: string) {
+  return request<BetaAccessRequest>(`/api/admin/beta-access-requests/${id}/reject`, {
+    method: 'POST'
+  });
+}
+
+export function listUsers() {
+  return request<AuthUser[]>('/api/admin/users');
+}
+
+export function createUser(payload: CreateUserRequest) {
+  return request<AuthUser>('/api/admin/users', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function enableUser(id: string) {
+  return request<AuthUser>(`/api/admin/users/${id}/enable`, {
+    method: 'PATCH'
+  });
+}
+
+export function disableUser(id: string) {
+  return request<AuthUser>(`/api/admin/users/${id}/disable`, {
+    method: 'PATCH'
+  });
 }
 
 export function createAnalysis(payload: CreateAnalysisRequest) {

@@ -61,7 +61,9 @@ public sealed class AnalyzePropertyDocumentCommandTests
         Assert.NotNull(result);
         Assert.Contains(result.Findings, finding =>
             finding.Category == nameof(FindingCategory.Financial) &&
-            finding.Severity == nameof(FindingSeverity.Medium));
+            finding.Severity == nameof(FindingSeverity.High));
+        Assert.NotNull(result.ExpenseIntelligence);
+        Assert.Equal(80, result.ExpenseIntelligence.BuildingHealthScore);
     }
 
     [Fact]
@@ -152,6 +154,8 @@ public sealed class AnalyzePropertyDocumentCommandTests
             1,
             12,
             8,
+            null,
+            null,
             true,
             true,
             true,
