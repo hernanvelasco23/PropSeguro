@@ -1,0 +1,239 @@
+using Microsoft.EntityFrameworkCore;
+using PropSeguro.Application.Common;
+using PropSeguro.Application.PropertyAnalyses.Reports;
+using PropSeguro.Domain.PropertyAnalyses;
+using PropSeguro.Infrastructure.Persistence;
+
+namespace PropSeguro.Domain.Tests;
+
+public sealed class PropertyReportBuilderTests
+{
+    [Fact]
+    public async Task Report_is_generated_for_property()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+        var builder = new DeterministicPropertyReportBuilder(dbContext, User(userId));
+
+        var report = await builder.BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Equal(analysis.Title, report.PropertySummary.Title);
+        Assert.Equal(DeterministicPropertyReportBuilder.DisclaimerText, report.Disclaimer);
+    }
+
+    [Fact]
+    public async Task User_cannot_access_another_users_report()
+    {
+        await using var dbContext = CreateDbContext();
+        var analysis = CreateAnalysis(Guid.NewGuid());
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+        var builder = new DeterministicPropertyReportBuilder(dbContext, User(Guid.NewGuid()));
+
+        var report = await builder.BuildAsync(analysis.Id);
+
+        Assert.Null(report);
+    }
+
+    [Fact]
+    public async Task Admin_can_access_any_report()
+    {
+        await using var dbContext = CreateDbContext();
+        var analysis = CreateAnalysis(Guid.NewGuid());
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+        var builder = new DeterministicPropertyReportBuilder(dbContext, User(Guid.NewGuid(), isAdmin: true));
+
+        var report = await builder.BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+    }
+
+    [Fact]
+    public async Task Critical_finding_leads_to_avoid()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        var document = analysis.AddDocument(Guid.NewGuid(), DocumentType.ReservationAgreement, "reserva.pdf", "application/pdf", 1024, "storage/reserva.pdf");
+        var finding = new DocumentFinding(document.Id, analysis.Id, FindingSeverity.Critical, FindingCategory.Legal, "Reserva no reintegrable", "Clausula critica.");
+        dbContext.PropertyAnalyses.Add(analysis);
+        dbContext.DocumentFindings.Add(finding);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Equal("Avoid", report.OverallRecommendation);
+    }
+
+    [Fact]
+    public async Task Missing_documents_leads_to_wait_for_documents()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Equal("WaitForDocuments", report.OverallRecommendation);
+    }
+
+    [Fact]
+    public async Task Expense_amount_mismatch_leads_to_renegotiate()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        MarkChecklistProvided(analysis);
+        var reservation = analysis.AddDocument(Guid.NewGuid(), DocumentType.ReservationAgreement, "reserva.pdf", "application/pdf", 1024, "storage/reserva.pdf");
+        reservation.CompleteAnalysis("Reserva revisada", LastAnalyzedTextSource.ManualText, []);
+        var expenses = analysis.AddDocument(Guid.NewGuid(), DocumentType.Expenses, "expensas.pdf", "application/pdf", 1024, "storage/expensas.pdf");
+        expenses.StoreExtractedText("Piso 8 Depto B Total a pagar $ 140.000");
+        var finding = new DocumentFinding(
+            expenses.Id,
+            analysis.Id,
+            FindingSeverity.High,
+            FindingCategory.Financial,
+            "Las expensas del documento no coinciden con la publicacion",
+            "El valor detectado en el documento difiere significativamente del valor cargado o publicado.");
+        dbContext.PropertyAnalyses.Add(analysis);
+        dbContext.DocumentFindings.Add(finding);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Equal("Renegotiate", report.OverallRecommendation);
+    }
+
+    [Fact]
+    public async Task Good_opportunity_and_acceptable_protection_can_advance()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId, priceUsd: 115000, monthlyExpenses: 200);
+        MarkChecklistProvided(analysis);
+        var reservation = analysis.AddDocument(Guid.NewGuid(), DocumentType.ReservationAgreement, "reserva.pdf", "application/pdf", 1024, "storage/reserva.pdf");
+        reservation.CompleteAnalysis("Reserva revisada", LastAnalyzedTextSource.ManualText, []);
+        var expenses = analysis.AddDocument(Guid.NewGuid(), DocumentType.Expenses, "expensas.pdf", "application/pdf", 1024, "storage/expensas.pdf");
+        expenses.StoreExtractedText("Piso 8 Depto B Total a pagar $ 200");
+        expenses.CompleteAnalysis("Piso 8 Depto B Total a pagar $ 200", LastAnalyzedTextSource.ExtractedText, []);
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Contains(report.OverallRecommendation, new[] { "Advance", "AdvanceWithCaution" });
+    }
+
+    [Fact]
+    public async Task Report_aggregates_suggested_questions()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        var document = analysis.AddDocument(Guid.NewGuid(), DocumentType.ReservationAgreement, "reserva.pdf", "application/pdf", 1024, "storage/reserva.pdf");
+        var finding = new DocumentFinding(
+            document.Id,
+            analysis.Id,
+            FindingSeverity.High,
+            FindingCategory.Legal,
+            "Reserva no reintegrable",
+            "Texto riesgoso.",
+            "La reserva se devuelve si aparece un problema documental?");
+        dbContext.PropertyAnalyses.Add(analysis);
+        dbContext.DocumentFindings.Add(finding);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Contains("La reserva se devuelve si aparece un problema documental?", report.SuggestedQuestions);
+    }
+
+    [Fact]
+    public async Task Report_includes_disclaimer()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Contains("no reemplaza", report.Disclaimer);
+    }
+
+    private static ApplicationDbContext CreateDbContext()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+
+        return new ApplicationDbContext(options);
+    }
+
+    private static PropertyAnalysis CreateAnalysis(
+        Guid userId,
+        decimal priceUsd = 150000,
+        decimal? monthlyExpenses = 90000)
+    {
+        var analysis = new PropertyAnalysis(
+            "Departamento en Palermo",
+            "https://example.com",
+            "Av. Santa Fe 3200",
+            "Palermo",
+            priceUsd,
+            monthlyExpenses,
+            60,
+            54,
+            3,
+            2,
+            1,
+            12,
+            8,
+            "B",
+            "12",
+            true,
+            true,
+            true,
+            PropertyCondition.Good,
+            null);
+
+        analysis.AssignOwner(userId);
+        analysis.RunInitialAnalysis();
+        return analysis;
+    }
+
+    private static void MarkChecklistProvided(PropertyAnalysis analysis)
+    {
+        foreach (var item in analysis.ChecklistItems)
+        {
+            item.MarkProvided();
+        }
+    }
+
+    private static TestCurrentUserContext User(Guid userId, bool isAdmin = false)
+    {
+        return new TestCurrentUserContext(userId, isAdmin);
+    }
+
+    private sealed class TestCurrentUserContext(Guid userId, bool isAdmin) : ICurrentUserContext
+    {
+        public Guid? UserId => userId;
+        public string? Email => "test@propsegura.local";
+        public string? Role => isAdmin ? "Admin" : "User";
+        public bool IsAdmin => isAdmin;
+    }
+}

@@ -10,6 +10,7 @@ import {
   ExpenseDocumentValidation,
   ExpenseIntelligenceAnalysis,
   PropertyAnalysis,
+  PropertyReport,
   PropertyAnalysisSummary,
   PropertyCondition,
   PropertyDocument,
@@ -25,6 +26,7 @@ import {
   disableUser,
   enableUser,
   getAnalysis,
+  getPropertyReport,
   getStoredAuthUser,
   importListing,
   listBetaAccessRequests,
@@ -41,13 +43,15 @@ import propertyPlaceholder from './assets/property-placeholder.svg';
 
 const documentTypes: DocumentType[] = [
   'Expenses',
-  'AssemblyMinutes',
-  'CoOwnershipRegulation',
-  'DomainReport',
-  'FloorPlan',
   'ReservationAgreement',
+  'AssemblyMinutes',
+  'FloorPlan',
+  'DomainReport',
   'Other'
 ];
+
+const availableDocumentTypes: DocumentType[] = ['Expenses', 'ReservationAgreement'];
+const futureDocumentTypes: DocumentType[] = ['AssemblyMinutes', 'FloorPlan', 'DomainReport', 'Other'];
 
 const documentTypeLabels: Record<DocumentType, string> = {
   Expenses: 'Últimas expensas',
@@ -2084,6 +2088,35 @@ function AnalysisDetail({
   const workspaceFormId = `property-edit-${analysis.id}`;
   const [uploadingCover, setUploadingCover] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('general');
+  const [selectedDocumentType, setSelectedDocumentType] = useState<DocumentType | null>(null);
+  const [report, setReport] = useState<PropertyReport | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+
+  useEffect(() => {
+    setReport(null);
+    setSelectedDocumentType(null);
+  }, [analysis.id]);
+
+  useEffect(() => {
+    if (activeTab === 'report' && !report && !reportLoading) {
+      void loadReport();
+    }
+  }, [activeTab, report, reportLoading]);
+
+  async function loadReport() {
+    setReportLoading(true);
+    setLoading(true);
+    onError(null);
+
+    try {
+      setReport(await getPropertyReport(analysis.id));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'No se pudo cargar el informe.');
+    } finally {
+      setReportLoading(false);
+      setLoading(false);
+    }
+  }
 
   async function handleCoverImageChange(file: File | null) {
     if (!file) {
@@ -2246,6 +2279,17 @@ function AnalysisDetail({
         )}
 
         {activeTab === 'documents' && (
+        <DocumentWorkspace
+          analysis={analysis}
+          selectedDocumentType={selectedDocumentType}
+          onSelectDocumentType={setSelectedDocumentType}
+          onRefresh={onRefresh}
+          onError={onError}
+          setLoading={setLoading}
+        />
+        )}
+
+        {false && (
         <section className="panel document-workspace edit-continuation-card" id="documents-workspace">
           <div className="section-heading">
             <div>
@@ -2279,18 +2323,268 @@ function AnalysisDetail({
               <h3>Señales agrupadas por severidad</h3>
             </div>
           </div>
-          <GroupedFindings riskFindings={analysis.riskFindings} documentFindings={analysis.documentFindings} />
+          <GroupedFindings riskFindings={analysis.riskFindings} documentFindings={analysis.documentFindings} documents={analysis.documents} />
         </section>
         )}
 
         {activeTab === 'report' && (
-        <section className="wizard-disclaimer edit-report-note" id="report-workspace">
-          <span aria-hidden="true">◇</span>
-          <p><strong>Informe final:</strong> próximamente vas a poder generar un resumen exportable. Por ahora, usá esta pantalla para completar datos, documentos y hallazgos.</p>
-        </section>
+        <PropertyReportPanel report={report} loading={reportLoading} onRefresh={loadReport} />
         )}
       </main>
     </div>
+  );
+}
+
+function PropertyReportPanel({
+  report,
+  loading,
+  onRefresh
+}: {
+  report: PropertyReport | null;
+  loading: boolean;
+  onRefresh: () => Promise<void>;
+}) {
+  if (!report && loading) {
+    return (
+      <section className="panel report-page">
+        <div className="empty-state">
+          <strong>Generando informe...</strong>
+          <p>Estamos consolidando oportunidad, proteccion, documentacion y proximos pasos.</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (!report) {
+    return (
+      <section className="panel report-page">
+        <div className="empty-state">
+          <strong>Informe no disponible</strong>
+          <p>Actualiza el informe para generar el resumen de esta propiedad.</p>
+          <button className="primary-button" type="button" onClick={() => void onRefresh()}>
+            Actualizar informe
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  const recommendationTone = reportRecommendationTone(report.overallRecommendation);
+
+  return (
+    <section className="report-page" id="report-workspace">
+      <div className="report-header">
+        <div>
+          <p className="eyebrow">Informe PropSegura</p>
+          <h2>Resumen de oportunidad, proteccion, documentacion y proximos pasos.</h2>
+          <span>Generado el {formatDate(report.generatedAtUtc)}</span>
+        </div>
+        <div className="report-actions">
+          <button className={`secondary-button ${loading ? 'btn-loading' : ''}`} type="button" onClick={() => void onRefresh()} disabled={loading} aria-busy={loading ? 'true' : undefined}>
+            {loading && <span className="button-spinner" aria-hidden="true" />}
+            {loading ? 'Cargando...' : 'Actualizar informe'}
+          </button>
+          <button className="ghost-button" type="button" disabled>Descargar PDF - Proximamente</button>
+          <button className="ghost-button" type="button" disabled>Enviar por mail - Proximamente</button>
+        </div>
+      </div>
+
+      <article className={`report-recommendation report-recommendation-${recommendationTone}`}>
+        <Badge tone={recommendationTone}>{report.overallRecommendationLabel}</Badge>
+        <h3>{report.executiveSummary}</h3>
+        <p>{report.overallRecommendationExplanation}</p>
+      </article>
+
+      <div className="report-summary-cards">
+        <Info label="OpportunityScore" value={formatNumber(report.opportunitySection.opportunityScore)} />
+        <Info label="ProtectionScore" value={formatNumber(report.protectionSection.protectionScore)} />
+        <Info label="Precio objetivo" value={formatMoney(report.negotiationSection.suggestedTargetPriceUsd)} />
+        <Info label="BuildingHealthScore" value={formatNumber(report.expensesSection.buildingHealthScore)} />
+      </div>
+
+      <div className="report-grid">
+        <ReportCard title="Datos de la propiedad">
+          <div className="summary-grid compact-report-grid">
+            <Info label="Propiedad" value={report.propertySummary.title} />
+            <Info label="Direccion" value={report.propertySummary.address} />
+            <Info label="Barrio" value={report.propertySummary.neighborhood} />
+            <Info label="Precio" value={formatMoney(report.propertySummary.priceUsd)} />
+            <Info label="Metros" value={formatNumber(report.propertySummary.totalSquareMeters)} />
+            <Info label="USD/m2" value={formatMoney(report.propertySummary.usdPerSquareMeter)} />
+            <Info label="Expensas" value={formatMoney(report.propertySummary.monthlyExpenses)} />
+            <Info label="Unidad" value={formatReportUnit(report.propertySummary)} />
+          </div>
+        </ReportCard>
+
+        <ReportCard title="Evaluacion de oportunidad">
+          <p>{report.opportunitySection.explanation}</p>
+          <div className="badge-row">
+            <Badge tone="success">{report.opportunitySection.recommendedUseLabel}</Badge>
+            <Badge tone={riskTone(report.opportunitySection.initialRiskLevel)}>{report.opportunitySection.initialRiskLevelLabel}</Badge>
+            <Badge tone="info">{report.opportunitySection.benchmarkComparison}</Badge>
+          </div>
+        </ReportCard>
+
+        <ReportCard title="Negociacion">
+          <p>{report.negotiationSection.explanation}</p>
+          <div className="summary-grid compact-report-grid">
+            <Info label="Precio publicado" value={formatMoney(report.negotiationSection.publishedPriceUsd)} />
+            <Info label="Valor estimado" value={formatRange(report.negotiationSection.estimatedFairValueMinUsd, report.negotiationSection.estimatedFairValueMaxUsd)} />
+            <Info label="Oferta inicial" value={formatMoney(report.negotiationSection.suggestedFirstOfferUsd)} />
+            <Info label="Margen" value={formatPercent(report.negotiationSection.negotiationMarginPercent)} />
+          </div>
+        </ReportCard>
+
+        <ReportCard title="Validacion documental">
+          <p>{report.protectionSection.explanation}</p>
+          <p>{report.protectionSection.documentConfidenceSummary}</p>
+          <div className="summary-grid compact-report-grid">
+            <Info label="Requeridos" value={formatNumber(report.documentsSection.requiredDocumentsCount)} />
+            <Info label="Cargados" value={formatNumber(report.documentsSection.providedDocumentsCount)} />
+            <Info label="Pendientes" value={formatNumber(report.documentsSection.missingDocumentsCount)} />
+            <Info label="Altos/Criticos" value={formatNumber(report.protectionSection.highOrCriticalFindingsCount)} />
+          </div>
+        </ReportCard>
+
+        <ReportDocumentSection title="Reserva" section={report.reservationSection} emptyText="Reserva no analizada todavia." />
+        <ReportExpensesSection section={report.expensesSection} />
+      </div>
+
+      <ReportFindingsSection section={report.findingsSection} />
+
+      <div className="report-grid report-list-grid">
+        <ReportList title="Preguntas sugeridas" items={report.suggestedQuestions} emptyText="No hay preguntas sugeridas por ahora." />
+        <ReportList title="Puntos para negociar" items={report.suggestedNegotiationPoints} emptyText="No hay puntos para negociar por ahora." />
+        <ReportList title="Proximos pasos" items={report.nextSteps} emptyText="No hay proximos pasos sugeridos." />
+      </div>
+
+      <div className="wizard-disclaimer edit-report-note">
+        <span aria-hidden="true">◇</span>
+        <p>{report.disclaimer}</p>
+      </div>
+    </section>
+  );
+}
+
+function ReportCard({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <article className="panel report-card">
+      <h3>{title}</h3>
+      {children}
+    </article>
+  );
+}
+
+function ReportDocumentSection({
+  title,
+  section,
+  emptyText
+}: {
+  title: string;
+  section: PropertyReport['reservationSection'];
+  emptyText: string;
+}) {
+  return (
+    <ReportCard title={title}>
+      {!section.isAvailable || !section.isAnalyzed ? (
+        <div className="empty-state compact-empty">
+          <strong>{emptyText}</strong>
+          <p>{section.status}</p>
+        </div>
+      ) : (
+        <>
+          <Badge tone={findingTone(section.riskLevel ?? 'Info')}>{findingSeverityLabel(section.riskLevel ?? 'Info')}</Badge>
+          <ReportFindingPreview findings={section.keyFindings} />
+        </>
+      )}
+    </ReportCard>
+  );
+}
+
+function ReportExpensesSection({ section }: { section: PropertyReport['expensesSection'] }) {
+  return (
+    <ReportCard title="Expensas">
+      {!section.isAvailable || !section.isAnalyzed ? (
+        <div className="empty-state compact-empty">
+          <strong>Expensas no analizadas todavia.</strong>
+          <p>{section.status}</p>
+        </div>
+      ) : (
+        <>
+          <div className="summary-grid compact-report-grid">
+            <Info label="Salud edificio" value={formatNumber(section.buildingHealthScore)} />
+            <Info label="Clasificacion" value={section.buildingHealthClassification ?? 'Sin dato'} />
+            <Info label="Confianza" value={section.documentConfidence ? `${section.documentConfidence.confidenceScore}%` : 'Sin dato'} />
+            <Info label="Expensa detectada" value={formatMoney(section.detectedExpenseAmount)} />
+            <Info label="Unidad" value={section.unitValidationStatus ?? 'Sin dato'} />
+          </div>
+          <ReportFindingPreview findings={section.keyFindings} />
+        </>
+      )}
+    </ReportCard>
+  );
+}
+
+function ReportFindingPreview({ findings }: { findings: DocumentFinding[] }) {
+  if (findings.length === 0) {
+    return <p className="section-copy">No hay hallazgos relevantes en esta seccion.</p>;
+  }
+
+  return (
+    <div className="report-finding-preview">
+      {findings.slice(0, 4).map((finding) => (
+        <article key={finding.id}>
+          <Badge tone={findingTone(finding.severity)}>{findingSeverityLabel(finding.severity)}</Badge>
+          <strong>{finding.title}</strong>
+          <p>{finding.buyerImpact ?? finding.description}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function ReportFindingsSection({ section }: { section: PropertyReport['findingsSection'] }) {
+  if (section.groups.length === 0) {
+    return (
+      <ReportCard title="Hallazgos principales">
+        <div className="empty-state compact-empty">
+          <strong>No hay hallazgos detectados todavia</strong>
+          <p>Cuando analices documentos, las senales relevantes van a aparecer en este informe.</p>
+        </div>
+      </ReportCard>
+    );
+  }
+
+  return (
+    <ReportCard title="Hallazgos principales">
+      <div className="finding-groups report-finding-groups">
+        {section.groups.map((group) => (
+          <section className="finding-group" key={group.severity}>
+            <div className="finding-group-heading">
+              <Badge tone={findingTone(group.severity)}>{group.severityLabel}</Badge>
+              <span>{group.findings.length} hallazgos</span>
+            </div>
+            <ReportFindingPreview findings={group.findings} />
+          </section>
+        ))}
+      </div>
+    </ReportCard>
+  );
+}
+
+function ReportList({ title, items, emptyText }: { title: string; items: string[]; emptyText: string }) {
+  return (
+    <ReportCard title={title}>
+      {items.length === 0 ? (
+        <p className="section-copy">{emptyText}</p>
+      ) : (
+        <ul className="report-list">
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      )}
+    </ReportCard>
   );
 }
 
@@ -2576,7 +2870,195 @@ function Checklist({ items }: { items: ChecklistItem[] }) {
   );
 }
 
-function AddDocumentForm({
+function DocumentWorkspace({
+  analysis,
+  selectedDocumentType,
+  onSelectDocumentType,
+  onRefresh,
+  onError,
+  setLoading
+}: {
+  analysis: PropertyAnalysis;
+  selectedDocumentType: DocumentType | null;
+  onSelectDocumentType: (documentType: DocumentType | null) => void;
+  onRefresh: () => Promise<void>;
+  onError: (message: string | null) => void;
+  setLoading: (loading: boolean) => void;
+}) {
+  const stats = getDocumentWorkspaceStats(analysis);
+  const selectedDocuments = selectedDocumentType
+    ? getDocumentsByType(analysis.documents, selectedDocumentType)
+    : [];
+  const activeDocument = selectedDocuments[0] ?? null;
+  const activeFindings = activeDocument
+    ? analysis.documentFindings.filter((finding) => finding.propertyDocumentId === activeDocument.id)
+    : [];
+
+  return (
+    <section className="document-workspace-v2" id="documents-workspace">
+      <div className="section-heading document-workspace-heading">
+        <div>
+          <p className="eyebrow">Documentos</p>
+          <h3>Validación documental</h3>
+          <p className="section-copy">Trabajá un documento por vez: cargá, revisá texto, analizá y leé solo sus resultados.</p>
+        </div>
+      </div>
+
+      <div className="document-summary-grid">
+        <DocumentSummaryCard title="Cargados" value={stats.uploaded} text="tipos con archivo" />
+        <DocumentSummaryCard title="Analizados" value={stats.analyzed} text="con resultado disponible" />
+        <DocumentSummaryCard title="Pendientes" value={stats.pending} text="sin cargar todavía" />
+        <DocumentSummaryCard title="Críticos" value={stats.criticalFindings} text="hallazgos documentales" tone={stats.criticalFindings > 0 ? 'critical' : 'success'} />
+      </div>
+
+      <div className="document-workspace-grid">
+        <aside className="document-type-panel" aria-label="Tipos de documento">
+          <div className="document-type-panel-header">
+            <strong>Documentos</strong>
+            <span>PropSegura V1</span>
+          </div>
+          <DocumentTypeGroup
+            title="Disponibles ahora"
+            icon="✦"
+            documentTypes={availableDocumentTypes}
+            analysis={analysis}
+            selectedDocumentType={selectedDocumentType}
+            onSelectDocumentType={onSelectDocumentType}
+          />
+          <DocumentTypeGroup
+            title="Próximamente"
+            icon="▧"
+            documentTypes={futureDocumentTypes}
+            analysis={analysis}
+            selectedDocumentType={selectedDocumentType}
+            onSelectDocumentType={onSelectDocumentType}
+            future
+          />
+          <DocumentRoadmapFooter />
+        </aside>
+
+        <div className="selected-document-panel">
+          {!selectedDocumentType ? (
+            <DocumentStartState analysisId={analysis.id} onRefresh={onRefresh} onError={onError} setLoading={setLoading} />
+          ) : isFutureDocumentType(selectedDocumentType) ? (
+            <FutureDocumentPlaceholder documentType={selectedDocumentType} />
+          ) : (
+            <SelectedDocumentWorkspace
+              analysisId={analysis.id}
+              documentType={selectedDocumentType}
+              document={activeDocument}
+              olderDocumentsCount={Math.max(0, selectedDocuments.length - 1)}
+              findings={activeFindings}
+              expenseIntelligence={selectedDocumentType === 'Expenses' ? analysis.expenseIntelligence : null}
+              onRefresh={onRefresh}
+              onError={onError}
+              setLoading={setLoading}
+            />
+          )}
+          {/*
+          {!selectedDocumentType ? (
+            <div className="document-select-empty">
+              <span aria-hidden="true">▤</span>
+              <strong>Seleccione un documento</strong>
+              <p>Elegí el tipo de documento que querés cargar, revisar o analizar.</p>
+            </div>
+          ) : (
+            <SelectedDocumentWorkspace
+              analysisId={analysis.id}
+              documentType={selectedDocumentType}
+              document={activeDocument}
+              olderDocumentsCount={Math.max(0, selectedDocuments.length - 1)}
+              findings={activeFindings}
+              expenseIntelligence={selectedDocumentType === 'Expenses' ? analysis.expenseIntelligence : null}
+              onRefresh={onRefresh}
+              onError={onError}
+              setLoading={setLoading}
+            />
+          */}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DocumentSummaryCard({
+  title,
+  value,
+  text,
+  tone = 'neutral'
+}: {
+  title: string;
+  value: number;
+  text: string;
+  tone?: string;
+}) {
+  return (
+    <article className={`document-summary-card document-summary-${tone}`}>
+      <strong>{value}</strong>
+      <div>
+        <span>{title}</span>
+        <p>{text}</p>
+      </div>
+    </article>
+  );
+}
+
+function DocumentTypeGroup({
+  title,
+  icon,
+  documentTypes,
+  analysis,
+  selectedDocumentType,
+  onSelectDocumentType,
+  future = false
+}: {
+  title: string;
+  icon: string;
+  documentTypes: DocumentType[];
+  analysis: PropertyAnalysis;
+  selectedDocumentType: DocumentType | null;
+  onSelectDocumentType: (documentType: DocumentType) => void;
+  future?: boolean;
+}) {
+  return (
+    <div className={`document-type-group ${future ? 'document-type-group-future' : ''}`}>
+      <div className="document-type-group-heading">
+        <span aria-hidden="true">{icon}</span>
+        <strong>{title}</strong>
+      </div>
+      <div className="document-type-list">
+        {documentTypes.map((documentType) => (
+          <DocumentTypeItem
+            key={documentType}
+            documentType={documentType}
+            documents={getDocumentsByType(analysis.documents, documentType)}
+            findings={getFindingsForDocumentType(analysis.documentFindings, analysis.documents, documentType)}
+            selected={selectedDocumentType === documentType}
+            future={future}
+            onClick={() => onSelectDocumentType(documentType)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DocumentRoadmapFooter() {
+  return (
+    <div className="document-roadmap-footer">
+      <strong>PropSegura V1</strong>
+      <span>✓ Expensas</span>
+      <span>✓ Reserva</span>
+      <strong>Próximamente</strong>
+      <span>Actas de consorcio</span>
+      <span>Plano del departamento</span>
+      <span>Informe de dominio e inhibiciones</span>
+      <span>Escritura</span>
+    </div>
+  );
+}
+
+function DocumentStartState({
   analysisId,
   onRefresh,
   onError,
@@ -2587,12 +3069,315 @@ function AddDocumentForm({
   onError: (message: string | null) => void;
   setLoading: (loading: boolean) => void;
 }) {
+  return (
+    <div className="document-start-state">
+      <div>
+        <p className="eyebrow">Seleccione un documento</p>
+        <h3>Elegí por dónde empezar</h3>
+        <p>PropSegura V1 analiza expensas y reserva. Te recomendamos empezar por expensas para entender costos, riesgos del consorcio y señales edilicias antes de reservar.</p>
+      </div>
+
+      <div className="document-start-grid">
+        <article className="document-start-card document-start-card-featured">
+          <span aria-hidden="true">▤</span>
+          <div>
+            <h4>Expensas</h4>
+            <Badge tone="success">Recomendado para comenzar</Badge>
+            <p>Las expensas suelen revelar obras pendientes, extraordinarias, humedad, problemas edilicios, juicios y gastos futuros.</p>
+          </div>
+          <label className="primary-button file-action-button">
+            Subir expensas
+            <AddDocumentInlineInput analysisId={analysisId} documentType="Expenses" onRefresh={onRefresh} onError={onError} setLoading={setLoading} />
+          </label>
+        </article>
+
+        <article className="document-start-card">
+          <span aria-hidden="true">▧</span>
+          <div>
+            <h4>Reserva</h4>
+            <p>Analizá cláusulas, penalidades, condiciones de devolución y obligaciones antes de comprometer dinero.</p>
+          </div>
+          <label className="secondary-button file-action-button">
+            Subir reserva
+            <AddDocumentInlineInput analysisId={analysisId} documentType="ReservationAgreement" onRefresh={onRefresh} onError={onError} setLoading={setLoading} />
+          </label>
+        </article>
+      </div>
+    </div>
+  );
+}
+
+function FutureDocumentPlaceholder({ documentType }: { documentType: DocumentType }) {
+  const content = futureDocumentContent(documentType);
+
+  return (
+    <div className="future-document-placeholder">
+      <span aria-hidden="true">{content.icon}</span>
+      <Badge tone="neutral">Disponible próximamente</Badge>
+      <h3>{content.title}</h3>
+      <p>{content.description}</p>
+      <ul>
+        {content.items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function DocumentTypeItem({
+  documentType,
+  documents,
+  findings,
+  selected,
+  future = false,
+  onClick
+}: {
+  documentType: DocumentType;
+  documents: PropertyDocument[];
+  findings: DocumentFinding[];
+  selected: boolean;
+  future?: boolean;
+  onClick: () => void;
+}) {
+  const latestDocument = documents[0] ?? null;
+  const risk = documentRiskLevel(findings);
+  const hasDocument = Boolean(latestDocument);
+
+  return (
+    <button className={`document-type-item ${selected ? 'selected' : ''} ${future ? 'future' : ''}`} type="button" onClick={onClick}>
+      <span className={`document-type-state ${hasDocument ? 'uploaded' : 'empty'}`} aria-hidden="true">
+        {hasDocument ? '✓' : '○'}
+      </span>
+      <span className="document-type-main">
+        <strong>{cleanDocumentTypeLabel(documentType)}</strong>
+        <small>{future ? 'Próximamente' : hasDocument ? documentAnalysisStatusLabel(latestDocument.analysisStatus) : 'No cargado'}</small>
+      </span>
+      {future && <Badge tone="neutral">Próximamente</Badge>}
+      {hasDocument && findings.length > 0 && (
+        <Badge tone={findingTone(risk)}>{findingSeverityLabel(risk)}</Badge>
+      )}
+    </button>
+  );
+}
+
+function SelectedDocumentWorkspace({
+  analysisId,
+  documentType,
+  document,
+  olderDocumentsCount,
+  findings,
+  expenseIntelligence,
+  onRefresh,
+  onError,
+  setLoading
+}: {
+  analysisId: string;
+  documentType: DocumentType;
+  document: PropertyDocument | null;
+  olderDocumentsCount: number;
+  findings: DocumentFinding[];
+  expenseIntelligence?: ExpenseIntelligenceAnalysis | null;
+  onRefresh: () => Promise<void>;
+  onError: (message: string | null) => void;
+  setLoading: (loading: boolean) => void;
+}) {
+  const risk = documentRiskLevel(findings);
+  const suggestedQuestions = uniqueStrings(findings.map((finding) => finding.suggestedQuestion));
+  const suggestedNegotiationPoints = uniqueStrings(findings.map((finding) => finding.suggestedNegotiationPoint ?? finding.suggestedChange));
+
+  return (
+    <div className="selected-document-workspace">
+      <header className="selected-document-header">
+        <div>
+          <p className="eyebrow">Documento activo</p>
+          <h3>{cleanDocumentTypeLabel(documentType)}</h3>
+          <div className="selected-document-status">
+            <Badge tone={document ? 'success' : 'neutral'}>{document ? 'Cargado' : 'No cargado'}</Badge>
+            {document && <Badge tone="neutral">{documentAnalysisStatusLabel(document.analysisStatus)}</Badge>}
+            {document && <Badge tone={textExtractionQualityTone(document.textExtractionQuality)}>{textExtractionQualityLabel(document.textExtractionQuality)}</Badge>}
+            {document && findings.length > 0 && <Badge tone={findingTone(risk)}>{findingSeverityLabel(risk)}</Badge>}
+          </div>
+        </div>
+        <div className="selected-document-actions">
+          <label className="secondary-button file-action-button">
+            Subir nuevo archivo
+            <AddDocumentInlineInput
+              analysisId={analysisId}
+              documentType={documentType}
+              onRefresh={onRefresh}
+              onError={onError}
+              setLoading={setLoading}
+            />
+          </label>
+          <button className="ghost-button" type="button" disabled>Eliminar documento</button>
+        </div>
+      </header>
+
+      {!document ? (
+        <div className="document-empty-workspace">
+          <strong>No hay {documentTypeEmptyLabel(documentType)} cargada todavía.</strong>
+          <p>Subí este documento para revisar el texto extraído y analizar sus señales de riesgo.</p>
+          <AddDocumentForm
+            analysisId={analysisId}
+            initialDocumentType={documentType}
+            lockDocumentType
+            onRefresh={onRefresh}
+            onError={onError}
+            setLoading={setLoading}
+          />
+        </div>
+      ) : (
+        <>
+          {olderDocumentsCount > 0 && (
+            <div className="summary-note document-version-note">
+              Se muestra el archivo más reciente. Hay {olderDocumentsCount} carga(s) anterior(es) de este tipo.
+            </div>
+          )}
+
+          <DocumentSpecificOverview
+            documentType={documentType}
+            document={document}
+            findings={findings}
+            expenseIntelligence={expenseIntelligence}
+            suggestedQuestions={suggestedQuestions}
+            suggestedNegotiationPoints={suggestedNegotiationPoints}
+          />
+
+          <DocumentCard
+            analysisId={analysisId}
+            document={document}
+            findings={findings}
+            onRefresh={onRefresh}
+            onError={onError}
+            setLoading={setLoading}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function AddDocumentInlineInput({
+  analysisId,
+  documentType,
+  onRefresh,
+  onError,
+  setLoading
+}: {
+  analysisId: string;
+  documentType: DocumentType;
+  onRefresh: () => Promise<void>;
+  onError: (message: string | null) => void;
+  setLoading: (loading: boolean) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+
+  async function handleFile(file: File | null) {
+    if (!file) {
+      return;
+    }
+
+    setUploading(true);
+    setLoading(true);
+    onError(null);
+
+    try {
+      await addDocument(analysisId, { documentType, file });
+      await onRefresh();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'No se pudo subir el documento.');
+    } finally {
+      setUploading(false);
+      setLoading(false);
+    }
+  }
+
+  return (
+    <input
+      type="file"
+      accept="application/pdf,.pdf"
+      disabled={uploading}
+      aria-busy={uploading ? 'true' : undefined}
+      onChange={(event) => void handleFile(event.target.files?.[0] ?? null)}
+    />
+  );
+}
+
+function DocumentSpecificOverview({
+  documentType,
+  document,
+  findings,
+  expenseIntelligence,
+  suggestedQuestions,
+  suggestedNegotiationPoints
+}: {
+  documentType: DocumentType;
+  document: PropertyDocument;
+  findings: DocumentFinding[];
+  expenseIntelligence?: ExpenseIntelligenceAnalysis | null;
+  suggestedQuestions: string[];
+  suggestedNegotiationPoints: string[];
+}) {
+  if (documentType === 'Expenses') {
+    return (
+      <div className="document-specific-grid">
+        <Info label="Salud del edificio" value={expenseIntelligence ? formatNumber(expenseIntelligence.buildingHealthScore) : 'Pendiente'} />
+        <Info label="Confianza" value={document.expenseValidation ? `${document.expenseValidation.confidenceScore}%` : textExtractionQualityLabel(document.textExtractionQuality)} />
+        <Info label="Expensa detectada" value={formatMoney(document.expenseValidation?.detectedExpenseAmount)} />
+        <Info label="Unidad detectada" value={document.expenseValidation ? formatDetectedExpenseUnit(document.expenseValidation) : 'Sin dato'} />
+        <Info label="Validación" value={document.expenseValidation?.label ?? 'Pendiente'} />
+        <Info label="Hallazgos" value={formatNumber(findings.length)} />
+      </div>
+    );
+  }
+
+  if (documentType === 'ReservationAgreement') {
+    return (
+      <div className="document-specific-grid">
+        <Info label="Riesgo" value={findingSeverityLabel(documentRiskLevel(findings))} />
+        <Info label="Hallazgos" value={formatNumber(findings.length)} />
+        <Info label="Preguntas sugeridas" value={formatNumber(suggestedQuestions.length)} />
+        <Info label="Puntos de negociación" value={formatNumber(suggestedNegotiationPoints.length)} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="document-future-card">
+      <strong>{cleanDocumentTypeLabel(documentType)}</strong>
+      <p>Este tipo de documento queda preparado para el flujo de carga y análisis. Las tarjetas específicas se agregarán cuando haya reglas dedicadas.</p>
+    </div>
+  );
+}
+
+function AddDocumentForm({
+  analysisId,
+  initialDocumentType,
+  lockDocumentType = false,
+  onRefresh,
+  onError,
+  setLoading
+}: {
+  analysisId: string;
+  initialDocumentType?: DocumentType;
+  lockDocumentType?: boolean;
+  onRefresh: () => Promise<void>;
+  onError: (message: string | null) => void;
+  setLoading: (loading: boolean) => void;
+}) {
   const [form, setForm] = useState<{ documentType: DocumentType; file: File | null }>({
-    documentType: 'Expenses',
+    documentType: initialDocumentType ?? 'Expenses',
     file: null
   });
   const [fileInputKey, setFileInputKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (initialDocumentType) {
+      setForm((current) => ({ ...current, documentType: initialDocumentType }));
+    }
+  }, [initialDocumentType]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -2609,7 +3394,7 @@ function AddDocumentForm({
         documentType: form.documentType,
         file: form.file
       });
-      setForm({ documentType: 'Expenses', file: null });
+      setForm({ documentType: initialDocumentType ?? 'Expenses', file: null });
       setFileInputKey((key) => key + 1);
       await onRefresh();
     } catch (err) {
@@ -2624,10 +3409,10 @@ function AddDocumentForm({
     <form className="stack-form" onSubmit={handleSubmit}>
       <label className="field">
         <span>Tipo</span>
-        <select value={form.documentType} onChange={(event) => setForm({ ...form, documentType: event.target.value as DocumentType })}>
+        <select value={form.documentType} disabled={lockDocumentType} onChange={(event) => setForm({ ...form, documentType: event.target.value as DocumentType })}>
           {documentTypes.map((type) => (
             <option key={type} value={type}>
-              {documentTypeLabels[type]}
+              {cleanDocumentTypeLabel(type)}
             </option>
           ))}
         </select>
@@ -2701,11 +3486,14 @@ function DocumentsList({
 
 function GroupedFindings({
   riskFindings,
-  documentFindings
+  documentFindings,
+  documents
 }: {
   riskFindings: PropertyAnalysis['riskFindings'];
   documentFindings: DocumentFinding[];
+  documents: PropertyDocument[];
 }) {
+  const documentTypeById = new Map(documents.map((document) => [document.id, document.documentType]));
   const combined = [
     ...riskFindings.map((finding) => ({
       id: finding.id,
@@ -2717,7 +3505,8 @@ function GroupedFindings({
       suggestedQuestion: null,
       suggestedChange: null,
       suggestedNegotiationPoint: null,
-      matchedText: null
+      matchedText: null,
+      source: 'Propiedad'
     })),
     ...documentFindings.map((finding) => ({
       id: finding.id,
@@ -2729,7 +3518,8 @@ function GroupedFindings({
       suggestedQuestion: finding.suggestedQuestion,
       suggestedChange: finding.suggestedChange,
       suggestedNegotiationPoint: finding.suggestedNegotiationPoint,
-      matchedText: finding.matchedText
+      matchedText: finding.matchedText,
+      source: cleanDocumentTypeLabel(documentTypeById.get(finding.propertyDocumentId) ?? 'Other')
     }))
   ];
 
@@ -2764,6 +3554,7 @@ function GroupedFindings({
                 <div className={`finding-card finding-${findingTone(finding.severity)}`} key={finding.id}>
                   <div>
                     <strong>{finding.title}</strong>
+                    <p><strong>Origen:</strong> {finding.source}</p>
                     <p>{finding.description}</p>
                     {finding.buyerImpact && <p><strong>Impacto para comprador:</strong> {finding.buyerImpact}</p>}
                     {finding.matchedText && <p><strong>Texto detectado:</strong> {finding.matchedText}</p>}
@@ -3233,6 +4024,115 @@ function documentRiskLevel(findings: DocumentFinding[]) {
   return 'Info';
 }
 
+function cleanDocumentTypeLabel(documentType: DocumentType) {
+  const labels: Record<DocumentType, string> = {
+    Expenses: 'Últimas expensas',
+    AssemblyMinutes: 'Actas de asamblea',
+    CoOwnershipRegulation: 'Reglamento de copropiedad',
+    DomainReport: 'Informe de dominio e inhibiciones',
+    FloorPlan: 'Plano del departamento',
+    ReservationAgreement: 'Reserva',
+    Other: 'Escritura'
+  };
+
+  return labels[documentType];
+}
+
+function isFutureDocumentType(documentType: DocumentType) {
+  return futureDocumentTypes.includes(documentType);
+}
+
+function futureDocumentContent(documentType: DocumentType) {
+  const content: Record<DocumentType, { icon: string; title: string; description: string; items: string[] }> = {
+    Expenses: {
+      icon: '▤',
+      title: 'Expensas',
+      description: 'Disponible en PropSegura V1.',
+      items: []
+    },
+    ReservationAgreement: {
+      icon: '▧',
+      title: 'Reserva',
+      description: 'Disponible en PropSegura V1.',
+      items: []
+    },
+    AssemblyMinutes: {
+      icon: '▦',
+      title: 'Actas de consorcio',
+      description: 'Las actas permitirán detectar:',
+      items: ['conflictos recurrentes', 'problemas edilicios', 'discusiones de consorcio', 'obras pendientes']
+    },
+    FloorPlan: {
+      icon: '⌗',
+      title: 'Plano del departamento',
+      description: 'Los planos permitirán validar:',
+      items: ['distribución real', 'superficies', 'inconsistencias', 'aprovechamiento del espacio']
+    },
+    DomainReport: {
+      icon: '⚖',
+      title: 'Informe de dominio e inhibiciones',
+      description: 'Permitirá validar:',
+      items: ['titularidad', 'inhibiciones', 'embargos', 'restricciones registrales']
+    },
+    Other: {
+      icon: '▩',
+      title: 'Escritura',
+      description: 'Permitirá revisar:',
+      items: ['antecedentes', 'observaciones', 'consistencia documental']
+    },
+    CoOwnershipRegulation: {
+      icon: '▥',
+      title: 'Reglamento de copropiedad',
+      description: 'Permitirá revisar reglas del edificio y restricciones de uso.',
+      items: ['uso permitido', 'restricciones', 'responsabilidades', 'reglas del consorcio']
+    }
+  };
+
+  return content[documentType];
+}
+
+function documentTypeEmptyLabel(documentType: DocumentType) {
+  const labels: Record<DocumentType, string> = {
+    Expenses: 'liquidación de expensas',
+    AssemblyMinutes: 'acta',
+    CoOwnershipRegulation: 'reglamento',
+    DomainReport: 'informe de dominio',
+    FloorPlan: 'plano',
+    ReservationAgreement: 'reserva',
+    Other: 'documentación'
+  };
+
+  return labels[documentType];
+}
+
+function getDocumentsByType(documents: PropertyDocument[], documentType: DocumentType) {
+  return documents
+    .filter((document) => document.documentType === documentType)
+    .sort((left, right) => Date.parse(right.uploadedAtUtc) - Date.parse(left.uploadedAtUtc));
+}
+
+function getFindingsForDocumentType(findings: DocumentFinding[], documents: PropertyDocument[], documentType: DocumentType) {
+  const documentIds = new Set(documents.filter((document) => document.documentType === documentType).map((document) => document.id));
+  return findings.filter((finding) => documentIds.has(finding.propertyDocumentId));
+}
+
+function getDocumentWorkspaceStats(analysis: PropertyAnalysis) {
+  const uploadedTypes = new Set(analysis.documents.map((document) => document.documentType));
+  const analyzedTypes = new Set(
+    analysis.documents
+      .filter((document) => document.analysisStatus === 'Completed')
+      .map((document) => document.documentType)
+  );
+  const criticalFindings = analysis.documentFindings.filter((finding) => finding.severity === 'Critical').length;
+
+  return {
+    uploaded: uploadedTypes.size,
+    analyzed: analyzedTypes.size,
+    pending: Math.max(0, documentTypes.length - uploadedTypes.size),
+    criticalFindings
+  };
+}
+
 function uniqueStrings(values: Array<string | null | undefined>) {
   return Array.from(new Set(values.filter((value): value is string => Boolean(value?.trim()))));
 }
@@ -3287,6 +4187,37 @@ function marketPositionLabel(position: string) {
   };
 
   return labels[position] ?? position;
+}
+
+function reportRecommendationTone(value: string) {
+  const tones: Record<string, string> = {
+    Advance: 'success',
+    AdvanceWithCaution: 'info',
+    WaitForDocuments: 'warning',
+    Renegotiate: 'warning',
+    Avoid: 'danger',
+    InsufficientData: 'neutral'
+  };
+
+  return tones[value] ?? 'neutral';
+}
+
+function formatReportUnit(summary: PropertyReport['propertySummary']) {
+  const parts = [];
+
+  if (summary.floor != null) {
+    parts.push(`Piso ${summary.floor}`);
+  }
+
+  if (summary.apartmentUnit) {
+    parts.push(`Depto ${summary.apartmentUnit}`);
+  }
+
+  if (summary.unitIdentifier) {
+    parts.push(`UF ${summary.unitIdentifier}`);
+  }
+
+  return parts.length === 0 ? 'Sin dato' : parts.join(' · ');
 }
 
 function TextField({

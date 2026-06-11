@@ -288,6 +288,98 @@ export type PropertyAnalysisSummary = {
   negotiationAnalysis: NegotiationAnalysis;
 };
 
+export type PropertyReport = {
+  propertySummary: PropertyReportSummary;
+  executiveSummary: string;
+  overallRecommendation: string;
+  overallRecommendationLabel: string;
+  overallRecommendationExplanation: string;
+  opportunitySection: PropertyReportOpportunitySection;
+  protectionSection: PropertyReportProtectionSection;
+  negotiationSection: PropertyReportNegotiationSection;
+  documentsSection: PropertyReportDocumentsSection;
+  reservationSection: PropertyReportDocumentTypeSection;
+  expensesSection: PropertyReportExpensesSection;
+  findingsSection: PropertyReportFindingsSection;
+  suggestedQuestions: string[];
+  suggestedNegotiationPoints: string[];
+  nextSteps: string[];
+  disclaimer: string;
+  generatedAtUtc: string;
+};
+
+export type PropertyReportSummary = {
+  title: string;
+  address: string;
+  neighborhood: string;
+  priceUsd?: number | null;
+  totalSquareMeters?: number | null;
+  usdPerSquareMeter?: number | null;
+  monthlyExpenses?: number | null;
+  floor?: number | null;
+  apartmentUnit?: string | null;
+  unitIdentifier?: string | null;
+};
+
+export type PropertyReportOpportunitySection = {
+  opportunityScore: number;
+  recommendedUse: string;
+  recommendedUseLabel: string;
+  initialRiskLevel: string;
+  initialRiskLevelLabel: string;
+  benchmarkComparison: string;
+  explanation: string;
+};
+
+export type PropertyReportProtectionSection = {
+  protectionScore: number;
+  documentConfidenceSummary: string;
+  missingDocumentsCount: number;
+  highOrCriticalFindingsCount: number;
+  explanation: string;
+};
+
+export type PropertyReportNegotiationSection = {
+  publishedPriceUsd?: number | null;
+  estimatedFairValueMinUsd?: number | null;
+  estimatedFairValueMaxUsd?: number | null;
+  suggestedFirstOfferUsd?: number | null;
+  suggestedTargetPriceUsd?: number | null;
+  negotiationMarginPercent?: number | null;
+  marketPosition: string;
+  marketPositionLabel: string;
+  explanation: string;
+};
+
+export type PropertyReportDocumentsSection = {
+  requiredDocumentsCount: number;
+  providedDocumentsCount: number;
+  missingDocumentsCount: number;
+  checklistItems: { title: string; documentType: string; isRequired: boolean; isProvided: boolean; status: string }[];
+};
+
+export type PropertyReportDocumentTypeSection = {
+  isAvailable: boolean;
+  isAnalyzed: boolean;
+  status: string;
+  riskLevel?: string | null;
+  keyFindings: DocumentFinding[];
+  suggestedQuestions: string[];
+  suggestedNegotiationPoints: string[];
+};
+
+export type PropertyReportExpensesSection = PropertyReportDocumentTypeSection & {
+  buildingHealthScore?: number | null;
+  buildingHealthClassification?: string | null;
+  documentConfidence?: ExpenseDocumentValidation | null;
+  detectedExpenseAmount?: number | null;
+  unitValidationStatus?: string | null;
+};
+
+export type PropertyReportFindingsSection = {
+  groups: { severity: string; severityLabel: string; findings: DocumentFinding[] }[];
+};
+
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5288').replace(/\/$/, '');
 const AUTH_TOKEN_KEY = 'propsegura.authToken';
 const AUTH_USER_KEY = 'propsegura.authUser';
@@ -425,6 +517,10 @@ export function createAnalysis(payload: CreateAnalysisRequest) {
 
 export function getAnalysis(id: string) {
   return request<PropertyAnalysis>(`/api/property-analyses/${id}`);
+}
+
+export function getPropertyReport(id: string) {
+  return request<PropertyReport>(`/api/property-analyses/${id}/report`);
 }
 
 export function listAnalyses() {
