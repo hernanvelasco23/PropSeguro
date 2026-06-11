@@ -16,6 +16,7 @@ using PropSeguro.Application.PropertyAnalyses.DeletePropertyAnalysis;
 using PropSeguro.Application.PropertyAnalyses.GetPropertyAnalysis;
 using PropSeguro.Application.PropertyAnalyses.SavePropertyDocumentText;
 using PropSeguro.Application.PropertyAnalyses.ListPropertyAnalyses;
+using PropSeguro.Application.PropertyAnalyses.Reports;
 using PropSeguro.Application.PropertyAnalyses.UpdatePropertyAnalysis;
 using PropSeguro.Application.PropertyAnalyses.UploadPropertyCoverImage;
 using PropSeguro.Domain.BetaAccess;
@@ -400,6 +401,16 @@ propertyAnalyses.MapGet("/{id:guid}", async (
     return result is null ? Results.NotFound() : Results.Ok(result);
 })
 .WithName("GetPropertyAnalysis");
+
+propertyAnalyses.MapGet("/{id:guid}/report", async (
+    Guid id,
+    IPropertyReportBuilder reportBuilder,
+    CancellationToken cancellationToken) =>
+{
+    var result = await reportBuilder.BuildAsync(id, cancellationToken);
+    return result is null ? Results.NotFound() : Results.Ok(result);
+})
+.WithName("GetPropertyAnalysisReport");
 
 propertyAnalyses.MapPut("/{id:guid}", async (
     Guid id,
