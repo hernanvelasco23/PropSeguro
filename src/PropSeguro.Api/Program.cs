@@ -218,6 +218,8 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
+app.MapGet("/ping", () => Results.Ok("pong"));
+
 // Temporarily enabled in Production while deployment configuration is being debugged.
 app.UseSwagger();
 app.UseSwaggerUI();
@@ -226,11 +228,11 @@ if (!app.Environment.IsProduction())
 {
     app.UseHttpsRedirection();
 }
-app.UseCors("ConfiguredFrontend");
-// TEMP debug Azure
-//app.UseRateLimiter();
-//app.UseAuthentication();
-//app.UseAuthorization();
+// Temporarily disabled to isolate Azure App Service 500 responses.
+// app.UseCors("ConfiguredFrontend");
+// app.UseRateLimiter();
+// app.UseAuthentication();
+// app.UseAuthorization();
 
 if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("SeedAdmin:Enabled"))
 {
