@@ -35,6 +35,16 @@ using PropSeguro.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
+if (builder.Configuration.GetValue<bool>("Diagnostics:MinimalPipeline"))
+{
+    var minimalApp = builder.Build();
+
+    minimalApp.MapGet("/ping", () => Results.Text("pong"));
+
+    minimalApp.Run();
+    return;
+}
+
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 
