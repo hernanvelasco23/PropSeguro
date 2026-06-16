@@ -227,9 +227,10 @@ if (!app.Environment.IsProduction())
     app.UseHttpsRedirection();
 }
 app.UseCors("ConfiguredFrontend");
+// TEMP debug Azure
 //app.UseRateLimiter();
-app.UseAuthentication();
-app.UseAuthorization();
+//app.UseAuthentication();
+//app.UseAuthorization();
 
 if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("SeedAdmin:Enabled"))
 {
