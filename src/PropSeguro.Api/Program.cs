@@ -216,9 +216,16 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
+var minimalPipeline = builder.Configuration.GetValue<bool>("Diagnostics:MinimalPipeline");
+
 var app = builder.Build();
 
-app.MapGet("/ping", () => Results.Ok("pong"));
+if (minimalPipeline)
+{
+    app.MapGet("/ping", () => Results.Text("pong")).AllowAnonymous();
+    app.Run();
+    return;
+}
 
 // Temporarily enabled in Production while deployment configuration is being debugged.
 app.UseSwagger();
