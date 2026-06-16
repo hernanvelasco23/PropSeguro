@@ -228,11 +228,10 @@ if (!app.Environment.IsProduction())
 {
     app.UseHttpsRedirection();
 }
-// Temporarily disabled to isolate Azure App Service 500 responses.
-// app.UseCors("ConfiguredFrontend");
-// app.UseRateLimiter();
-// app.UseAuthentication();
-// app.UseAuthorization();
+app.UseCors("ConfiguredFrontend");
+app.UseRateLimiter();
+app.UseAuthentication();
+app.UseAuthorization();
 
 if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("SeedAdmin:Enabled"))
 {
