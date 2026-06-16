@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using PropSeguro.Application.Common;
 using PropSeguro.Application.PropertyAnalyses.AddPropertyDocument;
 using PropSeguro.Domain.PropertyAnalyses;
 using PropSeguro.Infrastructure.Persistence;
@@ -11,12 +12,13 @@ public sealed class AddPropertyDocumentCommandTests
     public async Task Add_document_stores_metadata_and_marks_checklist_item_as_provided()
     {
         await using var dbContext = CreateDbContext();
-        var analysis = CreateAnalysis();
+        var ownerId = Guid.NewGuid();
+        var analysis = CreateAnalysis(ownerId);
         dbContext.PropertyAnalyses.Add(analysis);
         await dbContext.SaveChangesAsync();
 
         var documentId = Guid.NewGuid();
-        var handler = new AddPropertyDocumentCommandHandler(dbContext);
+        var handler = new AddPropertyDocumentCommandHandler(dbContext, User(ownerId));
 
         var result = await handler.Handle(new AddPropertyDocumentCommand(
             analysis.Id,
@@ -46,11 +48,12 @@ public sealed class AddPropertyDocumentCommandTests
     public async Task Add_pdf_with_empty_extracted_text_marks_extraction_as_empty()
     {
         await using var dbContext = CreateDbContext();
-        var analysis = CreateAnalysis();
+        var ownerId = Guid.NewGuid();
+        var analysis = CreateAnalysis(ownerId);
         dbContext.PropertyAnalyses.Add(analysis);
         await dbContext.SaveChangesAsync();
 
-        var handler = new AddPropertyDocumentCommandHandler(dbContext);
+        var handler = new AddPropertyDocumentCommandHandler(dbContext, User(ownerId));
 
         var result = await handler.Handle(new AddPropertyDocumentCommand(
             analysis.Id,
@@ -74,11 +77,12 @@ public sealed class AddPropertyDocumentCommandTests
     public async Task Add_non_pdf_document_does_not_store_extracted_text()
     {
         await using var dbContext = CreateDbContext();
-        var analysis = CreateAnalysis();
+        var ownerId = Guid.NewGuid();
+        var analysis = CreateAnalysis(ownerId);
         dbContext.PropertyAnalyses.Add(analysis);
         await dbContext.SaveChangesAsync();
 
-        var handler = new AddPropertyDocumentCommandHandler(dbContext);
+        var handler = new AddPropertyDocumentCommandHandler(dbContext, User(ownerId));
 
         var result = await handler.Handle(new AddPropertyDocumentCommand(
             analysis.Id,
@@ -106,7 +110,7 @@ public sealed class AddPropertyDocumentCommandTests
         return new ApplicationDbContext(options);
     }
 
-    private static PropertyAnalysis CreateAnalysis()
+    private static PropertyAnalysis CreateAnalysis(Guid ownerId)
     {
         var analysis = new PropertyAnalysis(
             "Departamento",
@@ -131,6 +135,29 @@ public sealed class AddPropertyDocumentCommandTests
             null);
 
         analysis.RunInitialAnalysis();
+        analysis.AssignOwner(ownerId);
         return analysis;
+    }
+
+    private static TestCurrentUserContext User(Guid userId)
+    {
+        return new TestCurrentUserContext(userId, isAdmin: false);
+    }
+
+    private sealed class TestCurrentUserContext : ICurrentUserContext
+    {
+        public TestCurrentUserContext(Guid userId, bool isAdmin)
+        {
+            UserId = userId;
+            IsAdmin = isAdmin;
+        }
+
+        public Guid? UserId { get; }
+
+        public string? Email => "test@propsegura.local";
+
+        public string? Role => IsAdmin ? "Admin" : "User";
+
+        public bool IsAdmin { get; }
     }
 }

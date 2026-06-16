@@ -104,8 +104,13 @@ export type CreatedBetaAccessRequest = {
 };
 
 export type ApproveBetaAccessResponse = {
-  request: BetaAccessRequest;
-  user: AuthUser;
+  requestId: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+  userId: string;
+  email: string;
+  emailSent: boolean;
+  emailError?: string | null;
+  message?: string | null;
   temporaryPassword?: string | null;
 };
 
@@ -149,7 +154,6 @@ export type PropertyDocument = {
   fileName: string;
   contentType: string;
   sizeBytes: number;
-  storagePath: string;
   hasExtractedText: boolean;
   extractedText?: string | null;
   editedText?: string | null;
@@ -252,7 +256,6 @@ export type PropertyAnalysis = {
   coverImageFileName?: string | null;
   coverImageContentType?: string | null;
   coverImageSizeBytes?: number | null;
-  coverImageStoragePath?: string | null;
   coverImageUploadedAtUtc?: string | null;
   coverImageUrl?: string | null;
   status: string;
@@ -290,7 +293,11 @@ export type PropertyAnalysisSummary = {
 
 export type PropertyReport = {
   propertySummary: PropertyReportSummary;
+  reportStatus: string;
+  reportStatusLabel: string;
+  coverSection: PropertyReportCoverSection;
   executiveSummary: string;
+  executiveConclusion: string;
   overallRecommendation: string;
   overallRecommendationLabel: string;
   overallRecommendationExplanation: string;
@@ -301,6 +308,14 @@ export type PropertyReport = {
   reservationSection: PropertyReportDocumentTypeSection;
   expensesSection: PropertyReportExpensesSection;
   findingsSection: PropertyReportFindingsSection;
+  whatThisMeansForYou: string[];
+  conditionsToAdvance: string[];
+  moneyRisks: PropertyReportMoneyRisk[];
+  negotiationArguments: string[];
+  questionsForSellerOrAgent: string[];
+  questionsForNotaryOrLawyer: string[];
+  reviewedDocuments: PropertyReportDocumentStatus[];
+  pendingDocuments: PropertyReportDocumentStatus[];
   suggestedQuestions: string[];
   suggestedNegotiationPoints: string[];
   nextSteps: string[];
@@ -319,6 +334,22 @@ export type PropertyReportSummary = {
   floor?: number | null;
   apartmentUnit?: string | null;
   unitIdentifier?: string | null;
+};
+
+export type PropertyReportCoverSection = {
+  title: string;
+  subtitle: string;
+  propertyTitle: string;
+  address: string;
+  neighborhood: string;
+  priceUsd?: number | null;
+  totalSquareMeters?: number | null;
+  usdPerSquareMeter?: number | null;
+  monthlyExpenses?: number | null;
+  coverImageUrl?: string | null;
+  reportStatus: string;
+  reportStatusLabel: string;
+  generatedAtUtc: string;
 };
 
 export type PropertyReportOpportunitySection = {
@@ -380,9 +411,27 @@ export type PropertyReportFindingsSection = {
   groups: { severity: string; severityLabel: string; findings: DocumentFinding[] }[];
 };
 
+export type PropertyReportMoneyRisk = {
+  title: string;
+  whyItMatters: string;
+  buyerImpact: string;
+  suggestedAction: string;
+  sourceDocumentType?: string | null;
+  sourceDocumentLabel?: string | null;
+};
+
+export type PropertyReportDocumentStatus = {
+  documentType: string;
+  documentLabel: string;
+  status: string;
+  isAnalyzed: boolean;
+  isFuture: boolean;
+};
+
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5288').replace(/\/$/, '');
 const AUTH_TOKEN_KEY = 'propsegura.authToken';
 const AUTH_USER_KEY = 'propsegura.authUser';
+export const AUTH_SESSION_EXPIRED_EVENT = 'propsegura:session-expired';
 
 export function getStoredAuthToken() {
   return window.localStorage.getItem(AUTH_TOKEN_KEY);
@@ -411,6 +460,11 @@ export function storeAuthSession(session: LoginResponse) {
 export function clearStoredAuth() {
   window.localStorage.removeItem(AUTH_TOKEN_KEY);
   window.localStorage.removeItem(AUTH_USER_KEY);
+}
+
+function notifySessionExpired() {
+  clearStoredAuth();
+  window.dispatchEvent(new CustomEvent(AUTH_SESSION_EXPIRED_EVENT));
 }
 
 export function resolveApiUrl(path?: string | null) {
@@ -443,6 +497,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers,
   });
 
+  if (response.status === 401) {
+    if (path === '/api/auth/login') {
+      throw new Error('Email o contraseña inválidos.');
+    }
+
+    notifySessionExpired();
+    throw new Error('Tu sesión expiró. Volvé a ingresar para continuar.');
+  }
+
   if (!response.ok) {
     const body = await response.text();
     throw new Error(body || `Request failed with status ${response.status}`);
@@ -453,6 +516,32 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const token = getStoredAuthToken();
+  const headers = new Headers(init?.headers);
+
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+  });
+
+  if (response.status === 401) {
+    notifySessionExpired();
+    throw new Error('Tu sesión expiró. Volvé a ingresar para continuar.');
+  }
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `Request failed with status ${response.status}`);
+  }
+
+  return response.blob();
 }
 
 export function login(email: string, password: string) {
@@ -521,6 +610,15 @@ export function getAnalysis(id: string) {
 
 export function getPropertyReport(id: string) {
   return request<PropertyReport>(`/api/property-analyses/${id}/report`);
+}
+
+export function downloadPropertyReportPdf(id: string) {
+  return requestBlob(`/api/property-analyses/${id}/report/pdf`);
+}
+
+export async function createProtectedAssetUrl(path: string) {
+  const blob = await requestBlob(path);
+  return URL.createObjectURL(blob);
 }
 
 export function listAnalyses() {

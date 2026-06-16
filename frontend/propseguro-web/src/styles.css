@@ -954,6 +954,25 @@ h4 {
   margin-top: 24px;
 }
 
+.secondary-link-button {
+  display: inline-flex;
+  justify-content: center;
+  width: 100%;
+  margin-top: 16px;
+  border: 0;
+  background: transparent;
+  color: #0b766f;
+  font: inherit;
+  font-weight: 900;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+
+.secondary-link-button:hover {
+  color: #084f4b;
+}
+
 .auth-success {
   display: grid;
   gap: 14px;
@@ -1052,6 +1071,24 @@ h4 {
   border-radius: 8px;
   background: #fff8e7;
   padding: 14px 18px;
+  color: #6c4600;
+}
+
+.admin-secret-success {
+  border-color: #bfe5dd;
+  background: #effaf7;
+  color: #0b3b38;
+}
+
+.admin-secret-info {
+  border-color: #b9ddea;
+  background: #f0f8fb;
+  color: #123b55;
+}
+
+.admin-secret-warning {
+  border-color: #f3d28c;
+  background: #fff8e7;
   color: #6c4600;
 }
 
@@ -3738,7 +3775,7 @@ body {
 
 .featured-opportunities {
   display: grid;
-  grid-template-columns: 1.05fr 0.98fr 1.05fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 18px;
   margin: 26px 0 18px;
 }
@@ -3746,7 +3783,7 @@ body {
 .featured-card {
   position: relative;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 14px;
   align-items: center;
   min-height: 118px;
@@ -3801,8 +3838,9 @@ body {
 }
 
 .featured-score {
-  display: grid;
+  display: inline-grid;
   justify-items: center;
+  justify-self: start;
   min-width: 72px;
   border: 1px solid #cfe7e1;
   border-radius: 8px;
@@ -3821,7 +3859,7 @@ body {
 }
 
 .featured-link {
-  grid-column: 3;
+  grid-column: 2;
   border: 0;
   background: transparent;
   color: #00695f;
@@ -3925,7 +3963,48 @@ body {
 }
 
 .dashboard-v2-page .comparison-table {
-  min-width: 1160px;
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.dashboard-v2-page .comparison-table th:nth-child(1),
+.dashboard-v2-page .comparison-table td:nth-child(1) {
+  width: 24%;
+}
+
+.dashboard-v2-page .comparison-table th:nth-child(2),
+.dashboard-v2-page .comparison-table td:nth-child(2) {
+  width: 9%;
+}
+
+.dashboard-v2-page .comparison-table th:nth-child(3),
+.dashboard-v2-page .comparison-table td:nth-child(3),
+.dashboard-v2-page .comparison-table th:nth-child(4),
+.dashboard-v2-page .comparison-table td:nth-child(4) {
+  width: 9%;
+}
+
+.dashboard-v2-page .comparison-table th:nth-child(5),
+.dashboard-v2-page .comparison-table td:nth-child(5),
+.dashboard-v2-page .comparison-table th:nth-child(6),
+.dashboard-v2-page .comparison-table td:nth-child(6) {
+  width: 11%;
+}
+
+.dashboard-v2-page .comparison-table th:nth-child(7),
+.dashboard-v2-page .comparison-table td:nth-child(7) {
+  width: 12%;
+}
+
+.dashboard-v2-page .comparison-table th:nth-child(8),
+.dashboard-v2-page .comparison-table td:nth-child(8) {
+  width: 15%;
+}
+
+.dashboard-v2-page .comparison-table th:nth-child(9),
+.dashboard-v2-page .comparison-table td:nth-child(9) {
+  width: 16%;
 }
 
 .dashboard-v2-page .comparison-table th {
@@ -3968,6 +4047,7 @@ body {
   border-radius: 7px;
   padding: 7px 10px;
   font-weight: 900;
+  max-width: 100%;
 }
 
 .decision-score strong {
@@ -3976,6 +4056,8 @@ body {
 
 .decision-score span {
   font-size: 0.72rem;
+  line-height: 1.2;
+  white-space: normal;
 }
 
 .score-excellent,
@@ -3994,12 +4076,21 @@ body {
   color: #c7352d;
 }
 
+.score-clear {
+  background: #e2f5ec;
+  color: #07804e;
+}
+
 .opinion-badge {
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   font-size: 0.86rem;
   font-weight: 850;
+  max-width: 100%;
+  line-height: 1.3;
+  white-space: normal;
 }
 
 .opinion-success {
@@ -4015,12 +4106,14 @@ body {
 }
 
 .dashboard-v2-page .row-actions {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  gap: 7px 10px;
 }
 
 .dashboard-v2-page .text-button {
   color: #071f3a;
   font-size: 0.84rem;
+  white-space: nowrap;
 }
 
 .dashboard-v2-page .danger-text-button {
@@ -4037,6 +4130,27 @@ body {
 
 .dashboard-card-view-note p {
   color: #667488;
+}
+
+.future-documents-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #dbe5ed;
+  border-radius: 8px;
+  background: #f8fbfd;
+  color: #40536a;
+  padding: 12px 14px;
+  font: inherit;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.future-documents-toggle:hover {
+  border-color: #9fb3c8;
+  background: #f2f7fa;
 }
 
 .dashboard-disclaimer {
@@ -4877,6 +4991,11 @@ body {
   color: #d78916;
 }
 
+.edit-kpi-neutral > span {
+  background: #edf3f8;
+  color: #52647a;
+}
+
 .edit-kpi-value {
   display: flex;
   align-items: baseline;
@@ -4898,22 +5017,72 @@ body {
   font-size: 1.55rem;
 }
 
+.edit-kpi-neutral .edit-kpi-value strong {
+  color: #52647a;
+  font-size: 1.35rem;
+}
+
 .edit-kpi-value span {
   color: #0b766f;
   font-size: 0.82rem;
   font-weight: 900;
+  line-height: 1.25;
+  white-space: normal;
 }
 
 .edit-opinion-card {
   display: grid;
-  align-content: start;
-  gap: 12px;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title action"
+    "value action";
+  align-items: center;
+  gap: 8px 16px;
+  align-content: center;
+  min-height: auto;
+  overflow: visible;
+}
+
+.edit-opinion-card h3 {
+  grid-area: title;
+  margin: 0;
+  min-width: 0;
+}
+
+.edit-opinion-card .edit-kpi-value {
+  grid-area: value;
+  display: block;
+  align-items: center;
+  min-width: 0;
+}
+
+.edit-opinion-card .edit-kpi-value strong {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  color: #7a520d;
+  font-size: clamp(1.05rem, 1.6vw, 1.35rem);
+  line-height: 1.15;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+
+.edit-opinion-card .edit-kpi-value span {
+  display: block;
+  margin-top: 6px;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .edit-opinion-card .ghost-button {
-  position: absolute;
-  right: 20px;
-  bottom: 20px;
+  grid-area: action;
+  position: static;
+  justify-self: end;
+  align-self: center;
   width: 38px;
   min-height: 38px;
   padding: 0;
@@ -5126,7 +5295,48 @@ body {
 }
 
 .edit-opinion-card {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title action"
+    "value action";
+  align-items: center;
+  align-content: center;
+  gap: 8px 18px;
+  min-height: auto;
   overflow: visible;
+}
+
+.edit-opinion-card h3 {
+  grid-area: title;
+  margin: 0;
+}
+
+.edit-opinion-card .edit-kpi-value {
+  grid-area: value;
+  min-width: 0;
+}
+
+.edit-opinion-card .edit-kpi-value strong {
+  display: block;
+  max-width: 100%;
+  color: #7a520d;
+  font-size: clamp(1.05rem, 1.5vw, 1.35rem);
+  line-height: 1.16;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+
+.edit-opinion-card .edit-kpi-value span {
+  display: block;
+  margin-top: 6px;
+}
+
+.edit-opinion-card .ghost-button {
+  grid-area: action;
+  align-self: center;
+  justify-self: end;
 }
 
 .edit-opinion-card .badge,
@@ -5185,6 +5395,56 @@ body {
   gap: 18px;
 }
 
+.buyer-report-cover {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  gap: 24px;
+  align-items: stretch;
+  border: 1px solid #dbe6ef;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #ffffff 0%, #f4fbf8 100%);
+  padding: 28px;
+  box-shadow: 0 24px 55px rgba(10, 35, 66, 0.08);
+}
+
+.buyer-report-cover h2 {
+  max-width: 820px;
+  margin: 6px 0 10px;
+  color: #092446;
+  font-size: clamp(2rem, 4vw, 3.4rem);
+  line-height: 1.04;
+}
+
+.buyer-report-cover p {
+  max-width: 720px;
+  color: #405064;
+  font-size: 1.03rem;
+  line-height: 1.6;
+}
+
+.buyer-report-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 22px 0;
+}
+
+.buyer-report-cover-media {
+  min-height: 280px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #e8eef4;
+}
+
+.buyer-report-cover-media img,
+.buyer-report-cover-placeholder {
+  width: 100%;
+  height: 100%;
+  min-height: 280px;
+  object-fit: cover;
+  display: block;
+}
+
 .report-header {
   display: flex;
   align-items: flex-start;
@@ -5239,6 +5499,20 @@ body {
   line-height: 1.58;
 }
 
+.report-recommendation strong {
+  display: block;
+  color: #10253d;
+  line-height: 1.5;
+}
+
+.report-consistency-note {
+  border-left: 4px solid #0b8b73;
+  background: rgba(11, 139, 115, 0.08);
+  padding: 12px 14px;
+  color: #163f3c;
+  font-weight: 750;
+}
+
 .report-recommendation-success {
   box-shadow: inset 5px 0 0 #14845f, 0 16px 40px rgba(15, 39, 66, 0.08);
 }
@@ -5282,6 +5556,54 @@ body {
   margin: 0;
 }
 
+.money-risk-list {
+  display: grid;
+  gap: 12px;
+}
+
+.money-risk-card {
+  border: 1px solid #f2d38a;
+  border-left: 5px solid #f2b84b;
+  border-radius: 12px;
+  background: #fffaf0;
+  padding: 16px;
+}
+
+.money-risk-card h4 {
+  margin: 10px 0 8px;
+  color: #092446;
+}
+
+.money-risk-card p {
+  margin: 6px 0;
+}
+
+.report-document-checklist {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.report-document-checklist h4 {
+  margin: 0 0 10px;
+  color: #092446;
+}
+
+.report-document-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #dbe6ef;
+  border-radius: 10px;
+  background: #f8fbfd;
+  padding: 12px;
+}
+
+.report-document-row + .report-document-row {
+  margin-top: 8px;
+}
+
 .compact-report-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -5322,6 +5644,12 @@ body {
 }
 
 @media (max-width: 1080px) {
+  .buyer-report-cover,
+  .buyer-report-meta,
+  .report-document-checklist {
+    grid-template-columns: 1fr;
+  }
+
   .report-header {
     display: grid;
   }
@@ -5335,4 +5663,50 @@ body {
   .report-list-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.edit-opinion-card {
+  grid-column: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 142px;
+  padding: 20px;
+  overflow: visible;
+}
+
+.edit-opinion-copy {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.edit-opinion-copy h3,
+.edit-opinion-copy p {
+  margin: 0;
+}
+
+.edit-opinion-label {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: #fff4d8;
+  color: #7a520d;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.edit-opinion-card .ghost-button {
+  flex: 0 0 auto;
+  position: static;
+  width: 38px;
+  min-height: 38px;
+  padding: 0;
 }

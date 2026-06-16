@@ -10,8 +10,11 @@ public sealed class JwtOptions
 {
     public string Issuer { get; set; } = "PropSegura";
     public string Audience { get; set; } = "PropSegura";
+    public string Secret { get; set; } = string.Empty;
     public string SigningKey { get; set; } = "dev-only-change-this-signing-key-for-propsegura-private-beta";
     public int ExpirationMinutes { get; set; } = 720;
+
+    public string EffectiveSigningKey => string.IsNullOrWhiteSpace(Secret) ? SigningKey : Secret;
 }
 
 public interface IJwtTokenService
@@ -24,7 +27,7 @@ public sealed class JwtTokenService(IConfiguration configuration) : IJwtTokenSer
     public string CreateToken(AppUser user)
     {
         var options = configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(options.SigningKey));
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(options.EffectiveSigningKey));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         var claims = new[]
         {

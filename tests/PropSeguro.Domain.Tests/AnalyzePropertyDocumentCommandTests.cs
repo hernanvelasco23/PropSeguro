@@ -12,11 +12,12 @@ public sealed class AnalyzePropertyDocumentCommandTests
     public async Task Analyze_with_invalid_document_id_returns_null()
     {
         await using var dbContext = CreateDbContext();
-        var analysis = CreateAnalysis();
+        var ownerId = Guid.NewGuid();
+        var analysis = CreateAnalysis(ownerId);
         dbContext.PropertyAnalyses.Add(analysis);
         await dbContext.SaveChangesAsync();
 
-        var handler = new AnalyzePropertyDocumentCommandHandler(dbContext, new DeterministicDocumentIntelligenceAnalyzer());
+        var handler = new AnalyzePropertyDocumentCommandHandler(dbContext, new DeterministicDocumentIntelligenceAnalyzer(), User(ownerId));
 
         var result = await handler.Handle(new AnalyzePropertyDocumentCommand(analysis.Id, Guid.NewGuid(), "texto"), CancellationToken.None);
 
@@ -27,15 +28,16 @@ public sealed class AnalyzePropertyDocumentCommandTests
     public async Task Analyze_document_from_another_analysis_returns_null()
     {
         await using var dbContext = CreateDbContext();
-        var firstAnalysis = CreateAnalysis();
-        var secondAnalysis = CreateAnalysis();
+        var ownerId = Guid.NewGuid();
+        var firstAnalysis = CreateAnalysis(ownerId);
+        var secondAnalysis = CreateAnalysis(ownerId);
         var document = new PropertyDocument(Guid.NewGuid(), secondAnalysis.Id, DocumentType.Expenses, "expensas.pdf", "application/pdf", 1024, "storage/test/original.pdf");
 
         dbContext.PropertyAnalyses.AddRange(firstAnalysis, secondAnalysis);
         dbContext.PropertyDocuments.Add(document);
         await dbContext.SaveChangesAsync();
 
-        var handler = new AnalyzePropertyDocumentCommandHandler(dbContext, new DeterministicDocumentIntelligenceAnalyzer());
+        var handler = new AnalyzePropertyDocumentCommandHandler(dbContext, new DeterministicDocumentIntelligenceAnalyzer(), User(ownerId));
 
         var result = await handler.Handle(new AnalyzePropertyDocumentCommand(firstAnalysis.Id, document.Id, "deuda"), CancellationToken.None);
 
@@ -46,7 +48,8 @@ public sealed class AnalyzePropertyDocumentCommandTests
     public async Task Analyze_uses_stored_extracted_text_when_request_text_is_empty()
     {
         await using var dbContext = CreateDbContext();
-        var analysis = CreateAnalysis();
+        var ownerId = Guid.NewGuid();
+        var analysis = CreateAnalysis(ownerId);
         var document = new PropertyDocument(Guid.NewGuid(), analysis.Id, DocumentType.Expenses, "expensas.pdf", "application/pdf", 1024, "storage/test/original.pdf");
         document.StoreExtractedText("Se aprueban expensas extraordinarias.");
 
@@ -54,7 +57,7 @@ public sealed class AnalyzePropertyDocumentCommandTests
         dbContext.PropertyDocuments.Add(document);
         await dbContext.SaveChangesAsync();
 
-        var handler = new AnalyzePropertyDocumentCommandHandler(dbContext, new DeterministicDocumentIntelligenceAnalyzer());
+        var handler = new AnalyzePropertyDocumentCommandHandler(dbContext, new DeterministicDocumentIntelligenceAnalyzer(), User(ownerId));
 
         var result = await handler.Handle(new AnalyzePropertyDocumentCommand(analysis.Id, document.Id, null), CancellationToken.None);
 
@@ -70,14 +73,15 @@ public sealed class AnalyzePropertyDocumentCommandTests
     public async Task Analyze_without_any_extracted_text_creates_documentation_finding()
     {
         await using var dbContext = CreateDbContext();
-        var analysis = CreateAnalysis();
+        var ownerId = Guid.NewGuid();
+        var analysis = CreateAnalysis(ownerId);
         var document = new PropertyDocument(Guid.NewGuid(), analysis.Id, DocumentType.Expenses, "escaneado.pdf", "application/pdf", 1024, "storage/test/original.pdf");
 
         dbContext.PropertyAnalyses.Add(analysis);
         dbContext.PropertyDocuments.Add(document);
         await dbContext.SaveChangesAsync();
 
-        var handler = new AnalyzePropertyDocumentCommandHandler(dbContext, new DeterministicDocumentIntelligenceAnalyzer());
+        var handler = new AnalyzePropertyDocumentCommandHandler(dbContext, new DeterministicDocumentIntelligenceAnalyzer(), User(ownerId));
 
         var result = await handler.Handle(new AnalyzePropertyDocumentCommand(analysis.Id, document.Id, ""), CancellationToken.None);
 
@@ -91,7 +95,8 @@ public sealed class AnalyzePropertyDocumentCommandTests
     public async Task Analyze_uses_edited_text_before_request_or_extracted_text()
     {
         await using var dbContext = CreateDbContext();
-        var analysis = CreateAnalysis();
+        var ownerId = Guid.NewGuid();
+        var analysis = CreateAnalysis(ownerId);
         var document = new PropertyDocument(Guid.NewGuid(), analysis.Id, DocumentType.ReservationAgreement, "reserva.pdf", "application/pdf", 1024, "storage/test/original.pdf");
         document.StoreExtractedText("Texto sin alertas. Comprador Juan DNI 1, vendedor Ana DNI 2. Domicilio calle falsa 123. Expensas, impuestos y servicios al dia. Sujeto a aprobacion crediticia y revision de documentacion satisfactoria. Plazo de entrega de documentacion completa.");
         document.SaveEditedText("La reserva es no reintegrable.");
@@ -100,7 +105,7 @@ public sealed class AnalyzePropertyDocumentCommandTests
         dbContext.PropertyDocuments.Add(document);
         await dbContext.SaveChangesAsync();
 
-        var handler = new AnalyzePropertyDocumentCommandHandler(dbContext, new DeterministicDocumentIntelligenceAnalyzer());
+        var handler = new AnalyzePropertyDocumentCommandHandler(dbContext, new DeterministicDocumentIntelligenceAnalyzer(), User(ownerId));
 
         var result = await handler.Handle(new AnalyzePropertyDocumentCommand(analysis.Id, document.Id, "texto manual sin alertas"), CancellationToken.None);
 
@@ -113,14 +118,15 @@ public sealed class AnalyzePropertyDocumentCommandTests
     public async Task Analyze_manual_text_is_saved_as_edited_text()
     {
         await using var dbContext = CreateDbContext();
-        var analysis = CreateAnalysis();
+        var ownerId = Guid.NewGuid();
+        var analysis = CreateAnalysis(ownerId);
         var document = new PropertyDocument(Guid.NewGuid(), analysis.Id, DocumentType.Expenses, "expensas.pdf", "application/pdf", 1024, "storage/test/original.pdf");
 
         dbContext.PropertyAnalyses.Add(analysis);
         dbContext.PropertyDocuments.Add(document);
         await dbContext.SaveChangesAsync();
 
-        var handler = new AnalyzePropertyDocumentCommandHandler(dbContext, new DeterministicDocumentIntelligenceAnalyzer());
+        var handler = new AnalyzePropertyDocumentCommandHandler(dbContext, new DeterministicDocumentIntelligenceAnalyzer(), User(ownerId));
 
         var result = await handler.Handle(new AnalyzePropertyDocumentCommand(analysis.Id, document.Id, "Hay deuda y morosidad."), CancellationToken.None);
 
@@ -138,7 +144,7 @@ public sealed class AnalyzePropertyDocumentCommandTests
         return new ApplicationDbContext(options);
     }
 
-    private static PropertyAnalysis CreateAnalysis()
+    private static PropertyAnalysis CreateAnalysis(Guid ownerId)
     {
         var analysis = new PropertyAnalysis(
             "Departamento",
@@ -163,6 +169,29 @@ public sealed class AnalyzePropertyDocumentCommandTests
             null);
 
         analysis.RunInitialAnalysis();
+        analysis.AssignOwner(ownerId);
         return analysis;
+    }
+
+    private static TestCurrentUserContext User(Guid userId)
+    {
+        return new TestCurrentUserContext(userId, isAdmin: false);
+    }
+
+    private sealed class TestCurrentUserContext : ICurrentUserContext
+    {
+        public TestCurrentUserContext(Guid userId, bool isAdmin)
+        {
+            UserId = userId;
+            IsAdmin = isAdmin;
+        }
+
+        public Guid? UserId { get; }
+
+        public string? Email => "test@propsegura.local";
+
+        public string? Role => IsAdmin ? "Admin" : "User";
+
+        public bool IsAdmin { get; }
     }
 }

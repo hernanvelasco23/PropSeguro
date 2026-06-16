@@ -173,6 +173,181 @@ public sealed class PropertyReportBuilderTests
 
         Assert.NotNull(report);
         Assert.Contains("no reemplaza", report.Disclaimer);
+        Assert.Contains("ordenar información", report.Disclaimer);
+    }
+
+    [Fact]
+    public async Task Report_status_is_ready_with_core_data_and_key_document_analyzed()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        var expenses = analysis.AddDocument(Guid.NewGuid(), DocumentType.Expenses, "expensas.pdf", "application/pdf", 1024, "storage/expensas.pdf");
+        expenses.CompleteAnalysis("Expensas revisadas", LastAnalyzedTextSource.ExtractedText, []);
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Equal("Ready", report.ReportStatus);
+        Assert.Equal("Informe listo", report.ReportStatusLabel);
+    }
+
+    [Fact]
+    public async Task Report_status_is_incomplete_without_analyzed_documents()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Equal("Incomplete", report.ReportStatus);
+    }
+
+    [Fact]
+    public async Task Report_status_needs_review_with_high_finding()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        var expenses = analysis.AddDocument(Guid.NewGuid(), DocumentType.Expenses, "expensas.pdf", "application/pdf", 1024, "storage/expensas.pdf");
+        expenses.CompleteAnalysis("Expensas revisadas", LastAnalyzedTextSource.ExtractedText, []);
+        var finding = new DocumentFinding(
+            expenses.Id,
+            analysis.Id,
+            FindingSeverity.High,
+            FindingCategory.Financial,
+            "Las expensas del documento no coinciden con la publicacion",
+            "El valor detectado difiere del publicado.");
+        dbContext.PropertyAnalyses.Add(analysis);
+        dbContext.DocumentFindings.Add(finding);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Equal("NeedsReview", report.ReportStatus);
+        Assert.NotEmpty(report.MoneyRisks);
+    }
+
+    [Fact]
+    public async Task Conditions_to_advance_include_missing_domain_report()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Contains("Solicitar informe de dominio e inhibiciones.", report.ConditionsToAdvance);
+    }
+
+    [Fact]
+    public async Task Questions_for_seller_are_aggregated_from_findings()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        var document = analysis.AddDocument(Guid.NewGuid(), DocumentType.ReservationAgreement, "reserva.pdf", "application/pdf", 1024, "storage/reserva.pdf");
+        var finding = new DocumentFinding(
+            document.Id,
+            analysis.Id,
+            FindingSeverity.Medium,
+            FindingCategory.Legal,
+            "Reserva con condicion poco clara",
+            "Texto riesgoso.",
+            "¿La reserva se devuelve si aparece un problema documental?");
+        dbContext.PropertyAnalyses.Add(analysis);
+        dbContext.DocumentFindings.Add(finding);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Contains("¿La reserva se devuelve si aparece un problema documental?", report.QuestionsForSellerOrAgent);
+    }
+
+    [Fact]
+    public async Task Questions_for_notary_are_generated_for_reservation_risk()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        var document = analysis.AddDocument(Guid.NewGuid(), DocumentType.ReservationAgreement, "reserva.pdf", "application/pdf", 1024, "storage/reserva.pdf");
+        var finding = new DocumentFinding(
+            document.Id,
+            analysis.Id,
+            FindingSeverity.High,
+            FindingCategory.Legal,
+            "Reserva no reintegrable",
+            "Texto riesgoso.");
+        dbContext.PropertyAnalyses.Add(analysis);
+        dbContext.DocumentFindings.Add(finding);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Contains("¿Conviene agregar una cláusula de devolución de reserva?", report.QuestionsForNotaryOrLawyer);
+    }
+
+    [Fact]
+    public async Task Checklist_separates_reviewed_and_pending_documents()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        var expenses = analysis.AddDocument(Guid.NewGuid(), DocumentType.Expenses, "expensas.pdf", "application/pdf", 1024, "storage/expensas.pdf");
+        expenses.CompleteAnalysis("Expensas revisadas", LastAnalyzedTextSource.ExtractedText, []);
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Contains(report.ReviewedDocuments, item => item.DocumentLabel == "Expensas" && item.IsAnalyzed);
+        Assert.Contains(report.PendingDocuments, item => item.DocumentLabel == "Escritura" && item.IsFuture);
+    }
+
+    [Fact]
+    public async Task Pdf_generator_creates_pdf_document()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        var expenses = analysis.AddDocument(Guid.NewGuid(), DocumentType.Expenses, "expensas.pdf", "application/pdf", 1024, "storage/expensas.pdf");
+        expenses.CompleteAnalysis("Expensas revisadas", LastAnalyzedTextSource.ExtractedText, []);
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        var bytes = new PropertyReportPdfGenerator().Generate(report!);
+
+        Assert.StartsWith("%PDF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4));
+        Assert.True(bytes.Length > 1000);
+    }
+
+    [Fact]
+    public async Task Pdf_generator_handles_empty_sections()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        var bytes = new PropertyReportPdfGenerator().Generate(report!);
+
+        Assert.StartsWith("%PDF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4));
     }
 
     private static ApplicationDbContext CreateDbContext()

@@ -41,6 +41,21 @@ public sealed class AppUser
         Status = UserStatus.Active;
     }
 
+    public void MakeAdmin()
+    {
+        Role = UserRole.Admin;
+    }
+
+    public void UpdateProfile(string fullName)
+    {
+        FullName = string.IsNullOrWhiteSpace(fullName) ? throw new ArgumentException("Full name is required.", nameof(fullName)) : fullName.Trim();
+    }
+
+    public void UpdatePasswordHash(string passwordHash)
+    {
+        PasswordHash = string.IsNullOrWhiteSpace(passwordHash) ? throw new ArgumentException("Password hash is required.", nameof(passwordHash)) : passwordHash;
+    }
+
     public void Disable()
     {
         Status = UserStatus.Disabled;

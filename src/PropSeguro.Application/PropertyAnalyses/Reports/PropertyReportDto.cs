@@ -1,8 +1,14 @@
 namespace PropSeguro.Application.PropertyAnalyses.Reports;
 
+using System.Text.Json.Serialization;
+
 public sealed record PropertyReportDto(
     PropertyReportSummaryDto PropertySummary,
+    string ReportStatus,
+    string ReportStatusLabel,
+    PropertyReportCoverSectionDto CoverSection,
     string ExecutiveSummary,
+    string ExecutiveConclusion,
     string OverallRecommendation,
     string OverallRecommendationLabel,
     string OverallRecommendationExplanation,
@@ -13,6 +19,14 @@ public sealed record PropertyReportDto(
     PropertyReportDocumentTypeSectionDto ReservationSection,
     PropertyReportExpensesSectionDto ExpensesSection,
     PropertyReportFindingsSectionDto FindingsSection,
+    IReadOnlyCollection<string> WhatThisMeansForYou,
+    IReadOnlyCollection<string> ConditionsToAdvance,
+    IReadOnlyCollection<PropertyReportMoneyRiskDto> MoneyRisks,
+    IReadOnlyCollection<string> NegotiationArguments,
+    IReadOnlyCollection<string> QuestionsForSellerOrAgent,
+    IReadOnlyCollection<string> QuestionsForNotaryOrLawyer,
+    IReadOnlyCollection<PropertyReportDocumentStatusDto> ReviewedDocuments,
+    IReadOnlyCollection<PropertyReportDocumentStatusDto> PendingDocuments,
     IReadOnlyCollection<string> SuggestedQuestions,
     IReadOnlyCollection<string> SuggestedNegotiationPoints,
     IReadOnlyCollection<string> NextSteps,
@@ -30,6 +44,23 @@ public sealed record PropertyReportSummaryDto(
     int? Floor,
     string? ApartmentUnit,
     string? UnitIdentifier);
+
+public sealed record PropertyReportCoverSectionDto(
+    string Title,
+    string Subtitle,
+    string PropertyTitle,
+    string Address,
+    string Neighborhood,
+    decimal? PriceUsd,
+    decimal? TotalSquareMeters,
+    decimal? UsdPerSquareMeter,
+    decimal? MonthlyExpenses,
+    string? CoverImageUrl,
+    [property: JsonIgnore]
+    string? CoverImageStoragePath,
+    string ReportStatus,
+    string ReportStatusLabel,
+    DateTime GeneratedAtUtc);
 
 public sealed record PropertyReportOpportunitySectionDto(
     int OpportunityScore,
@@ -100,3 +131,18 @@ public sealed record PropertyReportFindingGroupDto(
     string Severity,
     string SeverityLabel,
     IReadOnlyCollection<DocumentFindingDto> Findings);
+
+public sealed record PropertyReportMoneyRiskDto(
+    string Title,
+    string WhyItMatters,
+    string BuyerImpact,
+    string SuggestedAction,
+    string? SourceDocumentType,
+    string? SourceDocumentLabel);
+
+public sealed record PropertyReportDocumentStatusDto(
+    string DocumentType,
+    string DocumentLabel,
+    string Status,
+    bool IsAnalyzed,
+    bool IsFuture);

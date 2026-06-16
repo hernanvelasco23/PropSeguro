@@ -1,6 +1,7 @@
 import { CSSProperties, FormEvent, ReactNode, useEffect, useState } from 'react';
 import {
   AuthUser,
+  AUTH_SESSION_EXPIRED_EVENT,
   BetaAccessRequest,
   ChecklistItem,
   CreateBetaAccessRequest,
@@ -15,14 +16,15 @@ import {
   PropertyCondition,
   PropertyDocument,
   approveBetaAccessRequest,
-  resolveApiUrl,
   addDocument,
   analyzeDocument,
   clearStoredAuth,
+  createProtectedAssetUrl,
   createAnalysis,
   createBetaAccessRequest,
   createUser,
   deleteAnalysis,
+  downloadPropertyReportPdf,
   disableUser,
   enableUser,
   getAnalysis,
@@ -115,6 +117,14 @@ type DashboardSort =
 
 type SortDirection = 'asc' | 'desc';
 
+type ApprovalNotice = {
+  message: string;
+  detail?: string | null;
+  temporaryPassword?: string | null;
+  copied?: boolean;
+  tone: 'success' | 'warning' | 'info' | 'neutral';
+};
+
 type WorkspaceTab = 'general' | 'price' | 'documents' | 'findings' | 'report';
 
 const emptyCreateForm: CreateFormState = {
@@ -155,6 +165,19 @@ export function App() {
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    function handleSessionExpired() {
+      setCurrentUser(null);
+      setAnalysis(null);
+      setAnalyses([]);
+      setError('Tu sesión expiró. Volvé a ingresar para continuar.');
+      navigate('/login');
+    }
+
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired);
+    return () => window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired);
   }, []);
 
   useEffect(() => {
@@ -554,7 +577,7 @@ function LoginPage({
       <div className="auth-card">
         <p className="eyebrow">BETA PRIVADA</p>
         <h1>Ingresá a PropSegura</h1>
-        <p>Accedé a tus oportunidades inmobiliarias, documentos y análisis guardados.</p>
+        <p>Acceso disponible únicamente para usuarios invitados.</p>
         <form className="stack-form" onSubmit={handleSubmit}>
           <label className="field">
             <span>Email</span>
@@ -569,8 +592,8 @@ function LoginPage({
             {submitting ? 'Ingresando...' : 'Ingresar'}
           </button>
         </form>
-        <button className="text-button" type="button" onClick={onRequestAccess}>
-          ¿Todavía no tenés acceso? Solicitá una invitación
+        <button className="secondary-link-button" type="button" onClick={onRequestAccess}>
+          Solicitar acceso beta
         </button>
       </div>
     </section>
@@ -659,7 +682,7 @@ function AdminPage({
 }) {
   const [requests, setRequests] = useState<BetaAccessRequest[]>([]);
   const [users, setUsers] = useState<AuthUser[]>([]);
-  const [tempPassword, setTempPassword] = useState<string | null>(null);
+  const [approvalNotice, setApprovalNotice] = useState<ApprovalNotice | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [newUser, setNewUser] = useState<CreateUserRequest>({
     email: '',
@@ -694,13 +717,44 @@ function AdminPage({
 
     try {
       const result = await approveBetaAccessRequest(request.id);
-      setTempPassword(result.temporaryPassword ?? null);
+      if (result.emailSent) {
+        setApprovalNotice({
+          message: `Usuario aprobado e invitación enviada a ${result.email}.`,
+          tone: 'success'
+        });
+      } else if (result.emailError) {
+        setApprovalNotice({
+          message: result.message ?? 'Usuario aprobado, pero no se pudo enviar el email.',
+          detail: result.emailError,
+          temporaryPassword: result.temporaryPassword,
+          tone: 'warning'
+        });
+      } else {
+        setApprovalNotice({
+          message: 'Usuario aprobado. Email deshabilitado en este entorno.',
+          temporaryPassword: result.temporaryPassword,
+          tone: 'info'
+        });
+      }
       await refreshAdmin();
     } catch (err) {
       onError(err instanceof Error ? err.message : 'No se pudo aprobar la solicitud.');
     } finally {
       setBusyId(null);
       setLoading(false);
+    }
+  }
+
+  async function handleCopyTemporaryPassword() {
+    if (!approvalNotice?.temporaryPassword) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(approvalNotice.temporaryPassword);
+      setApprovalNotice({ ...approvalNotice, copied: true });
+    } catch {
+      onError('No se pudo copiar la contraseña temporal.');
     }
   }
 
@@ -770,10 +824,19 @@ function AdminPage({
         </button>
       </div>
 
-      {tempPassword && (
-        <div className="admin-secret">
-          <strong>Contraseña temporal generada:</strong>
-          <code>{tempPassword}</code>
+      {approvalNotice && (
+        <div className={`admin-secret admin-secret-${approvalNotice.tone}`}>
+          <strong>{approvalNotice.message}</strong>
+          {approvalNotice.detail && <span>{approvalNotice.detail}</span>}
+          {approvalNotice.temporaryPassword && (
+            <>
+              <span>Contraseña temporal:</span>
+              <code>{approvalNotice.temporaryPassword}</code>
+              <button className="secondary-button" type="button" onClick={() => void handleCopyTemporaryPassword()}>
+                {approvalNotice.copied ? 'Copiada' : 'Copiar'}
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -796,7 +859,7 @@ function AdminPage({
                 {request.status === 'Pending' && (
                   <div className="admin-row-actions">
                     <button className="primary-button" type="button" disabled={busyId === request.id} onClick={() => void handleApprove(request)}>
-                      Aprobar
+                      {busyId === request.id ? 'Aprobando...' : 'Aprobar acceso'}
                     </button>
                     <button className="danger-text-button" type="button" disabled={busyId === request.id} onClick={() => void handleReject(request)}>
                       Rechazar
@@ -1048,6 +1111,14 @@ function PropertyDashboard({
             eyebrow="Mejor para inversión"
             icon="↗"
             analysis={featured.bestInvestment}
+            scoreLabel="Opportunity Score"
+            onOpen={onOpen}
+            tone="success"
+          />
+          <FeaturedOpportunityCard
+            eyebrow="Mejor para vivienda"
+            icon="⌂"
+            analysis={featured.bestLiving}
             scoreLabel="Opportunity Score"
             onOpen={onOpen}
             tone="success"
@@ -1321,10 +1392,46 @@ function PropertyCoverImage({
   alt: string;
   className: string;
 }) {
+  const [assetUrl, setAssetUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    let objectUrl: string | null = null;
+
+    async function loadImage() {
+      if (!coverImageUrl) {
+        setAssetUrl(null);
+        return;
+      }
+
+      try {
+        objectUrl = await createProtectedAssetUrl(coverImageUrl);
+
+        if (isMounted) {
+          setAssetUrl(objectUrl);
+        }
+      } catch {
+        if (isMounted) {
+          setAssetUrl(null);
+        }
+      }
+    }
+
+    void loadImage();
+
+    return () => {
+      isMounted = false;
+
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [coverImageUrl]);
+
   return (
     <img
       className={className}
-      src={resolveApiUrl(coverImageUrl) ?? propertyPlaceholder}
+      src={assetUrl ?? propertyPlaceholder}
       alt={alt}
       loading="lazy"
     />
@@ -1414,7 +1521,7 @@ function PropertyDashboardRow({
       <td>{formatMoney(analysis.priceUsd)}</td>
       <td>{formatMoney(analysis.usdPerSquareMeter)}</td>
       <td><ScoreBadge type="opportunity" score={analysis.opportunityScore} /></td>
-      <td><ScoreBadge type="protection" score={analysis.protectionScore} /></td>
+      <td><ProtectionBadge analysis={analysis} /></td>
       <td><Badge tone={recommendedTone(analysis.recommendedUse)}>{recommendedUseLabel(analysis.recommendedUse)}</Badge></td>
       <td><OpinionBadge analysis={analysis} /></td>
       <td>
@@ -1453,6 +1560,19 @@ function ScoreBadge({ type, score }: { type: 'opportunity' | 'protection'; score
       <span>{scoreBadgeLabel(type, score)}</span>
     </span>
   );
+}
+
+function ProtectionBadge({ analysis }: { analysis: PropertyAnalysisSummary }) {
+  if (hasNoDetectedDocumentRisk(analysis)) {
+    return (
+      <span className="decision-score decision-score-protection score-clear">
+        <strong aria-hidden="true">◇</strong>
+        <span>Sin riesgos detectados</span>
+      </span>
+    );
+  }
+
+  return <ScoreBadge type="protection" score={analysis.protectionScore} />;
 }
 
 function OpinionBadge({ analysis }: { analysis: PropertyAnalysisSummary }) {
@@ -2091,6 +2211,9 @@ function AnalysisDetail({
   const [selectedDocumentType, setSelectedDocumentType] = useState<DocumentType | null>(null);
   const [report, setReport] = useState<PropertyReport | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
+  const analysisStatus = getWorkspaceAnalysisStatus(analysis, checklistStats, report);
+  const protectionKpi = getProtectionKpi(analysis);
+  const buildingHealthKpi = getBuildingHealthKpi(analysis.expenseIntelligence);
 
   useEffect(() => {
     setReport(null);
@@ -2162,7 +2285,7 @@ function AnalysisDetail({
             />
           </label>
         </div>
-        <Badge tone="success">En análisis</Badge>
+        <Badge tone={analysisStatus.tone}>{analysisStatus.badge}</Badge>
         <div className="sidebar-property-summary">
           <h2>{analysis.title}</h2>
           <p>{analysis.neighborhood || 'Sin barrio'}, CABA</p>
@@ -2171,9 +2294,9 @@ function AnalysisDetail({
         <div className="sidebar-progress-list">
           <WorkspaceStep title="Información básica" text="Completado" state={activeTab === 'general' ? 'active' : 'done'} number="1" onClick={() => setActiveTab('general')} />
           <WorkspaceStep title="Precio y características" text="Completado" state={activeTab === 'price' ? 'active' : 'done'} number="2" onClick={() => setActiveTab('price')} />
-          <WorkspaceStep title="Documentación" text={checklistStats.percent >= 100 ? 'Completado' : 'En progreso'} state={activeTab === 'documents' ? 'active' : 'pending'} number="3" onClick={() => setActiveTab('documents')} />
-          <WorkspaceStep title="Análisis y hallazgos" text={analysis.documentFindings.length > 0 ? 'En progreso' : 'Pendiente'} state={activeTab === 'findings' ? 'active' : 'pending'} number="4" onClick={() => setActiveTab('findings')} />
-          <WorkspaceStep title="Informe final" text="Pendiente" state={activeTab === 'report' ? 'active' : 'pending'} number="5" onClick={() => setActiveTab('report')} />
+          <WorkspaceStep title="Documentación" text={checklistStats.percent >= 100 ? 'Completado' : 'En progreso'} state={activeTab === 'documents' ? 'active' : checklistStats.percent >= 100 ? 'done' : 'pending'} number="3" onClick={() => setActiveTab('documents')} />
+          <WorkspaceStep title="Análisis y hallazgos" text={analysisStatus.findingsText} state={activeTab === 'findings' ? 'active' : analysisStatus.findingsDone ? 'done' : 'pending'} number="4" onClick={() => setActiveTab('findings')} />
+          <WorkspaceStep title="Informe final" text={report ? 'Informe generado' : 'Informe pendiente'} state={activeTab === 'report' ? 'active' : report ? 'done' : 'pending'} number="5" onClick={() => setActiveTab('report')} />
         </div>
         <div className="wizard-help-card edit-sidebar-help">
           <span className="wizard-help-icon" aria-hidden="true">◇</span>
@@ -2213,8 +2336,9 @@ function AnalysisDetail({
 
         <section className="edit-kpi-grid">
           <EditKpiCard title="Oportunidad" value={analysis.opportunityScore} label={scoreBadgeLabel('opportunity', analysis.opportunityScore)} text={analysis.benchmarkComparison || 'Comparación pendiente'} tone="success" icon="↗" />
-          <EditKpiCard title="Protección" value={analysis.protectionScore} label={scoreBadgeLabel('protection', analysis.protectionScore)} text="Riesgos documentales detectados" tone="warning" icon="◇" />
-          <EditKpiCard title="Negociación estimada" value={formatMoney(analysis.negotiationAnalysis?.suggestedTargetPriceUsd ?? analysis.suggestedTargetPriceUsd)} label="Rango sugerido" text="Basado en oportunidad y riesgos identificados" tone="info" />
+          <EditKpiCard title="Protección" value={protectionKpi.value} label={protectionKpi.label} text={protectionKpi.text} tone={protectionKpi.tone} icon="◇" />
+          <EditKpiCard title="Salud del edificio" value={buildingHealthKpi.value} label={buildingHealthKpi.label} text={buildingHealthKpi.text} tone={buildingHealthKpi.tone} icon="▥" />
+          <EditKpiCard title="Precio objetivo" value={formatMoney(analysis.negotiationAnalysis?.suggestedTargetPriceUsd ?? analysis.suggestedTargetPriceUsd)} label="Negociación" text="Basado en oportunidad y riesgos identificados" tone="info" />
           <EditOpinionCard opinion={detailOpinion} updatedAt={analysis.updatedAtUtc} />
         </section>
 
@@ -2289,32 +2413,6 @@ function AnalysisDetail({
         />
         )}
 
-        {false && (
-        <section className="panel document-workspace edit-continuation-card" id="documents-workspace">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Documentos</p>
-              <h3>Validación documental</h3>
-              <p className="section-copy">Completá el checklist, subí documentos y analizalos cuando estés listo para validar la propiedad.</p>
-            </div>
-          </div>
-          <div className="document-layout">
-            <div>
-              <h4>Checklist</h4>
-              <Checklist items={analysis.checklistItems} />
-            </div>
-            <div>
-              <h4>Subir documento</h4>
-              <AddDocumentForm analysisId={analysis.id} onRefresh={onRefresh} onError={onError} setLoading={setLoading} />
-            </div>
-          </div>
-          <div className="workspace-subsection">
-            <h4>Documentos cargados</h4>
-            <DocumentsList analysisId={analysis.id} documents={analysis.documents} findings={analysis.documentFindings} onRefresh={onRefresh} onError={onError} setLoading={setLoading} />
-          </div>
-        </section>
-        )}
-
         {activeTab === 'findings' && (
         <section className="panel edit-continuation-card" id="findings-workspace">
           <div className="section-heading compact-heading">
@@ -2328,7 +2426,7 @@ function AnalysisDetail({
         )}
 
         {activeTab === 'report' && (
-        <PropertyReportPanel report={report} loading={reportLoading} onRefresh={loadReport} />
+        <PropertyReportPanel report={report} analysisId={analysis.id} onError={onError} loading={reportLoading} onRefresh={loadReport} />
         )}
       </main>
     </div>
@@ -2337,13 +2435,44 @@ function AnalysisDetail({
 
 function PropertyReportPanel({
   report,
+  analysisId,
+  onError,
   loading,
   onRefresh
 }: {
   report: PropertyReport | null;
+  analysisId: string;
+  onError: (message: string | null) => void;
   loading: boolean;
   onRefresh: () => Promise<void>;
 }) {
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+
+  async function handleDownloadPdf() {
+    if (!report) {
+      return;
+    }
+
+    setDownloadingPdf(true);
+    onError(null);
+
+    try {
+      const blob = await downloadPropertyReportPdf(analysisId);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = buildReportPdfFileName(report);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'No se pudo descargar el PDF.');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }
+
   if (!report && loading) {
     return (
       <section className="panel report-page">
@@ -2370,29 +2499,69 @@ function PropertyReportPanel({
   }
 
   const recommendationTone = reportRecommendationTone(report.overallRecommendation);
+  const statusTone = reportStatusTone(report.reportStatus);
+  const consistencyNote = getReportConsistencyNote(report);
 
   return (
     <section className="report-page" id="report-workspace">
-      <div className="report-header">
+      <div className="buyer-report-cover">
         <div>
           <p className="eyebrow">Informe PropSegura</p>
-          <h2>Resumen de oportunidad, proteccion, documentacion y proximos pasos.</h2>
-          <span>Generado el {formatDate(report.generatedAtUtc)}</span>
+          <h2>{report.coverSection.propertyTitle}</h2>
+          <p>{report.coverSection.subtitle}</p>
+          <div className="buyer-report-meta">
+            <Info label="Barrio" value={report.coverSection.neighborhood || 'Sin dato'} />
+            <Info label="Dirección" value={report.coverSection.address || 'Sin dato'} />
+            <Info label="Precio" value={formatMoney(report.coverSection.priceUsd)} />
+            <Info label="m²" value={formatNumber(report.coverSection.totalSquareMeters)} />
+            <Info label="USD/m²" value={formatMoney(report.coverSection.usdPerSquareMeter)} />
+            <Info label="Expensas" value={formatMoney(report.coverSection.monthlyExpenses)} />
+          </div>
+          <div className="badge-row">
+            <Badge tone={statusTone}>{report.reportStatusLabel}</Badge>
+            <span>Generado el {formatDate(report.generatedAtUtc)}</span>
+          </div>
+        </div>
+        <div className="buyer-report-cover-media">
+          <PropertyCoverImage
+            className="buyer-report-cover-placeholder"
+            coverImageUrl={report.coverSection.coverImageUrl}
+            alt={report.coverSection.coverImageUrl ? `Imagen de ${report.coverSection.propertyTitle}` : 'Sin imagen'}
+          />
+        </div>
+      </div>
+
+      <div className="report-header">
+        <div>
+          <p className="eyebrow">Reporte para comprador</p>
+          <h2>Segunda opinión para decidir antes de reservar o comprar.</h2>
         </div>
         <div className="report-actions">
           <button className={`secondary-button ${loading ? 'btn-loading' : ''}`} type="button" onClick={() => void onRefresh()} disabled={loading} aria-busy={loading ? 'true' : undefined}>
             {loading && <span className="button-spinner" aria-hidden="true" />}
             {loading ? 'Cargando...' : 'Actualizar informe'}
           </button>
-          <button className="ghost-button" type="button" disabled>Descargar PDF - Proximamente</button>
-          <button className="ghost-button" type="button" disabled>Enviar por mail - Proximamente</button>
+          <button
+            className={`ghost-button ${downloadingPdf ? 'btn-loading' : ''}`}
+            type="button"
+            onClick={() => void handleDownloadPdf()}
+            disabled={downloadingPdf}
+            aria-busy={downloadingPdf ? 'true' : undefined}
+          >
+            {downloadingPdf && <span className="button-spinner" aria-hidden="true" />}
+            {downloadingPdf ? 'Descargando...' : 'Descargar PDF'}
+          </button>
+          <button className="ghost-button" type="button" disabled>Enviar por mail - Próximamente</button>
         </div>
       </div>
 
       <article className={`report-recommendation report-recommendation-${recommendationTone}`}>
         <Badge tone={recommendationTone}>{report.overallRecommendationLabel}</Badge>
-        <h3>{report.executiveSummary}</h3>
+        <h3>Conclusión ejecutiva</h3>
+        <p>{report.executiveConclusion}</p>
+        <strong>{report.executiveSummary}</strong>
         <p>{report.overallRecommendationExplanation}</p>
+        {consistencyNote && <p className="report-consistency-note">{consistencyNote}</p>}
       </article>
 
       <div className="report-summary-cards">
@@ -2402,11 +2571,18 @@ function PropertyReportPanel({
         <Info label="BuildingHealthScore" value={formatNumber(report.expensesSection.buildingHealthScore)} />
       </div>
 
+      <div className="report-grid report-list-grid">
+        <ReportList title="Qué significa esto para vos" items={report.whatThisMeansForYou} emptyText="Todavía faltan datos para generar consecuencias concretas." />
+        <ReportList title="Condiciones mínimas para avanzar" items={report.conditionsToAdvance} emptyText="No hay condiciones específicas detectadas." />
+      </div>
+
+      <ReportMoneyRisks risks={report.moneyRisks} />
+
       <div className="report-grid">
         <ReportCard title="Datos de la propiedad">
           <div className="summary-grid compact-report-grid">
             <Info label="Propiedad" value={report.propertySummary.title} />
-            <Info label="Direccion" value={report.propertySummary.address} />
+            <Info label="Dirección" value={report.propertySummary.address} />
             <Info label="Barrio" value={report.propertySummary.neighborhood} />
             <Info label="Precio" value={formatMoney(report.propertySummary.priceUsd)} />
             <Info label="Metros" value={formatNumber(report.propertySummary.totalSquareMeters)} />
@@ -2416,7 +2592,7 @@ function PropertyReportPanel({
           </div>
         </ReportCard>
 
-        <ReportCard title="Evaluacion de oportunidad">
+        <ReportCard title="Evaluación de oportunidad">
           <p>{report.opportunitySection.explanation}</p>
           <div className="badge-row">
             <Badge tone="success">{report.opportunitySection.recommendedUseLabel}</Badge>
@@ -2425,7 +2601,7 @@ function PropertyReportPanel({
           </div>
         </ReportCard>
 
-        <ReportCard title="Negociacion">
+        <ReportCard title="Negociación">
           <p>{report.negotiationSection.explanation}</p>
           <div className="summary-grid compact-report-grid">
             <Info label="Precio publicado" value={formatMoney(report.negotiationSection.publishedPriceUsd)} />
@@ -2435,14 +2611,14 @@ function PropertyReportPanel({
           </div>
         </ReportCard>
 
-        <ReportCard title="Validacion documental">
+        <ReportCard title="Validación documental">
           <p>{report.protectionSection.explanation}</p>
           <p>{report.protectionSection.documentConfidenceSummary}</p>
           <div className="summary-grid compact-report-grid">
             <Info label="Requeridos" value={formatNumber(report.documentsSection.requiredDocumentsCount)} />
             <Info label="Cargados" value={formatNumber(report.documentsSection.providedDocumentsCount)} />
             <Info label="Pendientes" value={formatNumber(report.documentsSection.missingDocumentsCount)} />
-            <Info label="Altos/Criticos" value={formatNumber(report.protectionSection.highOrCriticalFindingsCount)} />
+            <Info label="Altos/Críticos" value={formatNumber(report.protectionSection.highOrCriticalFindingsCount)} />
           </div>
         </ReportCard>
 
@@ -2450,12 +2626,14 @@ function PropertyReportPanel({
         <ReportExpensesSection section={report.expensesSection} />
       </div>
 
+      <ReportDocumentsChecklist reviewed={report.reviewedDocuments} pending={report.pendingDocuments} />
       <ReportFindingsSection section={report.findingsSection} />
 
       <div className="report-grid report-list-grid">
-        <ReportList title="Preguntas sugeridas" items={report.suggestedQuestions} emptyText="No hay preguntas sugeridas por ahora." />
-        <ReportList title="Puntos para negociar" items={report.suggestedNegotiationPoints} emptyText="No hay puntos para negociar por ahora." />
-        <ReportList title="Proximos pasos" items={report.nextSteps} emptyText="No hay proximos pasos sugeridos." />
+        <ReportList title="Argumentos para negociar" items={report.negotiationArguments} emptyText="No hay argumentos fuertes por ahora." />
+        <ReportList title="Preguntas para la inmobiliaria o el vendedor" items={report.questionsForSellerOrAgent} emptyText="No hay preguntas sugeridas por ahora." />
+        <ReportList title="Preguntas para escribano o abogado" items={report.questionsForNotaryOrLawyer} emptyText="No hay preguntas legales sugeridas por ahora." />
+        <ReportList title="Próximos pasos" items={report.nextSteps} emptyText="No hay próximos pasos sugeridos." />
       </div>
 
       <div className="wizard-disclaimer edit-report-note">
@@ -2521,6 +2699,74 @@ function ReportExpensesSection({ section }: { section: PropertyReport['expensesS
           <ReportFindingPreview findings={section.keyFindings} />
         </>
       )}
+    </ReportCard>
+  );
+}
+
+function ReportMoneyRisks({ risks }: { risks: PropertyReport['moneyRisks'] }) {
+  if (risks.length === 0) {
+    return (
+      <ReportCard title="Riesgos que podrían costarte dinero">
+        <div className="empty-state compact-empty">
+          <strong>No hay riesgos económicos fuertes detectados</strong>
+          <p>Con la información actual, no encontramos señales económicas críticas. Seguí completando documentos para mejorar la revisión.</p>
+        </div>
+      </ReportCard>
+    );
+  }
+
+  return (
+    <ReportCard title="Riesgos que podrían costarte dinero">
+      <div className="money-risk-list">
+        {risks.map((risk) => (
+          <article key={`${risk.title}-${risk.sourceDocumentLabel ?? 'property'}`} className="money-risk-card">
+            <div>
+              <Badge tone="warning">{risk.sourceDocumentLabel ?? 'Propiedad'}</Badge>
+              <h4>{risk.title}</h4>
+              <p><strong>Por qué importa:</strong> {risk.whyItMatters}</p>
+              <p><strong>Impacto posible:</strong> {risk.buyerImpact}</p>
+              <p><strong>Acción sugerida:</strong> {risk.suggestedAction}</p>
+            </div>
+          </article>
+        ))}
+      </div>
+    </ReportCard>
+  );
+}
+
+function ReportDocumentsChecklist({
+  reviewed,
+  pending
+}: {
+  reviewed: PropertyReport['reviewedDocuments'];
+  pending: PropertyReport['pendingDocuments'];
+}) {
+  return (
+    <ReportCard title="Checklist documental">
+      <div className="report-document-checklist">
+        <div>
+          <h4>Documentos revisados</h4>
+          {reviewed.length === 0 ? (
+            <p className="section-copy">Todavía no hay documentos analizados.</p>
+          ) : (
+            reviewed.map((document) => (
+              <div className="report-document-row" key={`${document.documentType}-${document.status}`}>
+                <strong>{document.documentLabel}</strong>
+                <Badge tone={document.isAnalyzed ? 'success' : 'warning'}>{document.status}</Badge>
+              </div>
+            ))
+          )}
+        </div>
+        <div>
+          <h4>Documentos pendientes</h4>
+          {pending.map((document) => (
+            <div className="report-document-row" key={`${document.documentType}-${document.status}`}>
+              <strong>{document.documentLabel}</strong>
+              <Badge tone={document.isFuture ? 'neutral' : 'warning'}>{document.status}</Badge>
+            </div>
+          ))}
+        </div>
+      </div>
     </ReportCard>
   );
 }
@@ -2638,7 +2884,7 @@ function EditKpiCard({
   value: number | string;
   label: string;
   text: string;
-  tone: 'success' | 'warning' | 'info';
+  tone: 'success' | 'warning' | 'info' | 'neutral';
   icon?: string;
 }) {
   return (
@@ -2665,9 +2911,11 @@ function EditOpinionCard({
 }) {
   return (
     <article className="edit-kpi-card edit-opinion-card">
-      <h3>Mi opinión</h3>
-      <Badge tone={opinion.tone}>{opinion.label}</Badge>
-      <p>Última actualización:<br />{formatDate(updatedAt)}</p>
+      <div className="edit-opinion-copy">
+        <h3>Mi opinión</h3>
+        <strong className={`edit-opinion-label opinion-${opinion.tone}`}>{opinion.label}</strong>
+        <p>Última actualización: {formatDate(updatedAt)}</p>
+      </div>
       <button className="ghost-button" type="button" aria-label="Editar opinión">✎</button>
     </article>
   );
@@ -2886,6 +3134,7 @@ function DocumentWorkspace({
   setLoading: (loading: boolean) => void;
 }) {
   const stats = getDocumentWorkspaceStats(analysis);
+  const [showFutureDocuments, setShowFutureDocuments] = useState(false);
   const selectedDocuments = selectedDocumentType
     ? getDocumentsByType(analysis.documents, selectedDocumentType)
     : [];
@@ -2925,15 +3174,21 @@ function DocumentWorkspace({
             selectedDocumentType={selectedDocumentType}
             onSelectDocumentType={onSelectDocumentType}
           />
-          <DocumentTypeGroup
-            title="Próximamente"
-            icon="▧"
-            documentTypes={futureDocumentTypes}
-            analysis={analysis}
-            selectedDocumentType={selectedDocumentType}
-            onSelectDocumentType={onSelectDocumentType}
-            future
-          />
+          <button className="future-documents-toggle" type="button" onClick={() => setShowFutureDocuments((value) => !value)}>
+            <span>Futuras versiones</span>
+            <Badge tone="neutral">{futureDocumentTypes.length} documentos</Badge>
+          </button>
+          {showFutureDocuments && (
+            <DocumentTypeGroup
+              title="Disponible en futuras versiones"
+              icon="▧"
+              documentTypes={futureDocumentTypes}
+              analysis={analysis}
+              selectedDocumentType={selectedDocumentType}
+              onSelectDocumentType={onSelectDocumentType}
+              future
+            />
+          )}
           <DocumentRoadmapFooter />
         </aside>
 
@@ -3151,9 +3406,8 @@ function DocumentTypeItem({
       </span>
       <span className="document-type-main">
         <strong>{cleanDocumentTypeLabel(documentType)}</strong>
-        <small>{future ? 'Próximamente' : hasDocument ? documentAnalysisStatusLabel(latestDocument.analysisStatus) : 'No cargado'}</small>
+        <small>{future ? 'Disponible en futuras versiones' : hasDocument ? documentAnalysisStatusLabel(latestDocument.analysisStatus) : 'No cargado'}</small>
       </span>
-      {future && <Badge tone="neutral">Próximamente</Badge>}
       {hasDocument && findings.length > 0 && (
         <Badge tone={findingTone(risk)}>{findingSeverityLabel(risk)}</Badge>
       )}
@@ -4202,6 +4456,31 @@ function reportRecommendationTone(value: string) {
   return tones[value] ?? 'neutral';
 }
 
+function reportStatusTone(value: string) {
+  const tones: Record<string, string> = {
+    Ready: 'success',
+    Incomplete: 'warning',
+    NeedsReview: 'danger'
+  };
+
+  return tones[value] ?? 'neutral';
+}
+
+function buildReportPdfFileName(report: PropertyReport) {
+  const safeTitle = report.propertySummary.title
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9-_ ]/g, '')
+    .trim()
+    .replace(/\s+/g, '-');
+  const date = new Date(report.generatedAtUtc);
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+
+  return `PropSegura-${safeTitle || 'Propiedad'}-${yyyy}${mm}${dd}.pdf`;
+}
+
 function formatReportUnit(summary: PropertyReport['propertySummary']) {
   const parts = [];
 
@@ -4371,8 +4650,8 @@ function matchesDashboardSearch(analysis: PropertyAnalysisSummary, searchTerm: s
 function getDashboardStats(analyses: PropertyAnalysisSummary[]) {
   const total = analyses.length;
   const recommended = analyses.filter((analysis) => ['Living', 'Investment', 'Both'].includes(analysis.recommendedUse) && analysis.opportunityScore >= 70).length;
-  const highRisk = analyses.filter((analysis) => analysis.initialRiskLevel === 'High' || analysis.criticalFindingsCount > 0 || analysis.opportunityScore < 50).length;
-  const needsAttention = analyses.filter((analysis) => analysis.missingRequiredDocumentsCount > 0 || analysis.criticalFindingsCount > 0 || analysis.protectionScore < 50).length;
+  const highRisk = analyses.filter(isHighRiskDashboardAnalysis).length;
+  const needsAttention = analyses.filter(needsDashboardAttention).length;
   const averageOpportunity = total === 0
     ? 0
     : Math.round(analyses.reduce((sum, analysis) => sum + analysis.opportunityScore, 0) / total);
@@ -4388,18 +4667,53 @@ function getDashboardStats(analyses: PropertyAnalysisSummary[]) {
 
 function getFeaturedAnalyses(analyses: PropertyAnalysisSummary[]) {
   const byOpportunity = [...analyses].sort((left, right) => right.opportunityScore - left.opportunityScore);
+  const bestOpportunity = byOpportunity[0];
   const investmentCandidates = analyses.filter((analysis) => analysis.recommendedUse === 'Investment' || analysis.recommendedUse === 'Both');
-  const attentionCandidates = analyses.filter((analysis) => analysis.missingRequiredDocumentsCount > 0 || analysis.criticalFindingsCount > 0 || analysis.protectionScore < 50 || analysis.initialRiskLevel === 'High');
+  const livingCandidates = analyses.filter((analysis) => analysis.recommendedUse === 'Living' || analysis.recommendedUse === 'Both');
+  const attentionCandidates = analyses.filter(needsDashboardAttention);
+  const bestInvestment = pickFeaturedCandidate(investmentCandidates, [bestOpportunity?.id]) ?? pickFeaturedCandidate(analyses, [bestOpportunity?.id]);
+  const bestLiving = pickFeaturedCandidate(livingCandidates, [bestOpportunity?.id, bestInvestment?.id]) ?? pickFeaturedCandidate(analyses, [bestOpportunity?.id, bestInvestment?.id]);
 
   return {
-    bestInvestment: [...(investmentCandidates.length > 0 ? investmentCandidates : analyses)].sort((left, right) => right.opportunityScore - left.opportunityScore)[0],
-    bestOpportunity: byOpportunity[0],
+    bestInvestment,
+    bestLiving,
+    bestOpportunity,
     needsAttention: [...(attentionCandidates.length > 0 ? attentionCandidates : analyses)].sort((left, right) =>
       right.criticalFindingsCount - left.criticalFindingsCount ||
       left.protectionScore - right.protectionScore ||
       right.missingRequiredDocumentsCount - left.missingRequiredDocumentsCount
     )[0]
   };
+}
+
+function pickFeaturedCandidate(candidates: PropertyAnalysisSummary[], excludedIds: Array<string | undefined>) {
+  const excluded = new Set(excludedIds.filter(Boolean));
+  const available = candidates.filter((analysis) => !excluded.has(analysis.id));
+
+  return [...(available.length > 0 ? available : candidates)].sort((left, right) =>
+    right.opportunityScore - left.opportunityScore ||
+    right.protectionScore - left.protectionScore ||
+    new Date(right.updatedAtUtc).getTime() - new Date(left.updatedAtUtc).getTime()
+  )[0];
+}
+
+function isHighRiskDashboardAnalysis(analysis: PropertyAnalysisSummary) {
+  return analysis.initialRiskLevel === 'High' ||
+    analysis.criticalFindingsCount > 0 ||
+    analysis.opportunityScore < 50;
+}
+
+function needsDashboardAttention(analysis: PropertyAnalysisSummary) {
+  return analysis.missingRequiredDocumentsCount > 0 ||
+    analysis.criticalFindingsCount > 0 ||
+    analysis.findingsCount > 0 ||
+    analysis.initialRiskLevel === 'High';
+}
+
+function hasNoDetectedDocumentRisk(analysis: PropertyAnalysisSummary) {
+  return analysis.protectionScore === 0 &&
+    analysis.findingsCount === 0 &&
+    analysis.criticalFindingsCount === 0;
 }
 
 function scoreClassName(type: 'opportunity' | 'protection', score: number) {
@@ -4574,6 +4888,98 @@ function getAnalysisOpinion(analysis: PropertyAnalysis, checklistStats: Checklis
     label: 'Seguiría avanzando',
     tone: 'success'
   };
+}
+
+function getWorkspaceAnalysisStatus(analysis: PropertyAnalysis, checklistStats: ChecklistStats, report: PropertyReport | null) {
+  const findingsDone = analysis.documentFindings.length > 0 ||
+    analysis.riskFindings.length > 0 ||
+    analysis.documents.some((document) => document.analysisStatus === 'Analyzed');
+  const completed = checklistStats.percent >= 100 && findingsDone && Boolean(report);
+
+  if (completed) {
+    return {
+      badge: 'Análisis completado',
+      findingsDone: true,
+      findingsText: 'Completado',
+      tone: 'success' as const
+    };
+  }
+
+  if (findingsDone) {
+    return {
+      badge: 'Analizando',
+      findingsDone: true,
+      findingsText: 'En progreso',
+      tone: 'warning' as const
+    };
+  }
+
+  return {
+    badge: 'Pendiente',
+    findingsDone: false,
+    findingsText: 'Pendiente',
+    tone: 'neutral' as const
+  };
+}
+
+function getProtectionKpi(analysis: PropertyAnalysis): { value: string | number; label: string; text: string; tone: 'success' | 'warning' | 'info' | 'neutral' } {
+  const hasFindings = analysis.documentFindings.length > 0 || analysis.riskFindings.length > 0;
+  const hasAnalyzedDocuments = analysis.documents.some((document) => document.analysisStatus === 'Analyzed');
+
+  if (!hasFindings && analysis.protectionScore === 0) {
+    return {
+      value: '◇',
+      label: 'Sin riesgos detectados',
+      text: hasAnalyzedDocuments
+        ? 'Los documentos analizados no muestran señales críticas.'
+        : 'Cargá expensas o reserva para validar la protección documental.',
+      tone: hasAnalyzedDocuments ? 'success' : 'neutral'
+    };
+  }
+
+  return {
+    value: analysis.protectionScore,
+    label: scoreBadgeLabel('protection', analysis.protectionScore),
+    text: hasFindings ? 'Riesgos documentales detectados' : 'Protección documental en evaluación',
+    tone: analysis.protectionScore >= 80 ? 'success' : analysis.protectionScore >= 50 ? 'info' : 'warning'
+  };
+}
+
+function getBuildingHealthKpi(expenseIntelligence?: ExpenseIntelligenceAnalysis | null): { value: string | number; label: string; text: string; tone: 'success' | 'warning' | 'info' | 'neutral' } {
+  if (!expenseIntelligence) {
+    return {
+      value: 'Pendiente',
+      label: 'Sin expensas',
+      text: 'Subí expensas para evaluar señales del edificio.',
+      tone: 'neutral'
+    };
+  }
+
+  const score = expenseIntelligence.buildingHealthScore;
+  return {
+    value: score,
+    label: expenseIntelligence.classification,
+    text: expenseIntelligence.summary,
+    tone: score >= 75 ? 'success' : score >= 55 ? 'info' : 'warning'
+  };
+}
+
+function getReportConsistencyNote(report: PropertyReport) {
+  const opportunityScore = report.opportunitySection.opportunityScore;
+  const recommendation = report.overallRecommendation;
+  const hasCriticalFindings = report.protectionSection.highOrCriticalFindingsCount > 0 ||
+    report.findingsSection.groups.some((group) => group.severity === 'Critical' || group.severity === 'High');
+  const missingDocuments = report.documentsSection.missingDocumentsCount;
+
+  if (opportunityScore >= 70 && (recommendation === 'Avoid' || recommendation === 'WaitForDocuments' || hasCriticalFindings || missingDocuments > 0)) {
+    if (hasCriticalFindings) {
+      return 'La oportunidad de mercado es buena, pero los riesgos documentales detectados impiden recomendar avanzar sin revisión profesional.';
+    }
+
+    return 'La oportunidad inicial puede ser buena, pero todavía falta documentación clave para confirmar si conviene avanzar.';
+  }
+
+  return null;
 }
 
 function formatMoney(value?: number | null) {

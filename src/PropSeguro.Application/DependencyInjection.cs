@@ -13,6 +13,7 @@ public static class DependencyInjection
         services.AddScoped<IExpenseIntelligenceAnalyzer, DeterministicExpenseIntelligenceAnalyzer>();
         services.AddScoped<IDocumentIntelligenceAnalyzer, DeterministicDocumentIntelligenceAnalyzer>();
         services.AddScoped<IPropertyReportBuilder, DeterministicPropertyReportBuilder>();
+        services.AddScoped<IPropertyReportPdfGenerator, PropertyReportPdfGenerator>();
 
         return services;
     }
