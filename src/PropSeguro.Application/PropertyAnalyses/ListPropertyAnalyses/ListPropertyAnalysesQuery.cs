@@ -20,13 +20,18 @@ public sealed class ListPropertyAnalysesQueryHandler : IRequestHandler<ListPrope
 
     public async Task<IReadOnlyCollection<PropertyAnalysisSummaryDto>> Handle(ListPropertyAnalysesQuery request, CancellationToken cancellationToken)
     {
+        if (_currentUser?.UserId is null)
+        {
+            return [];
+        }
+
         var query = _dbContext.PropertyAnalyses
             .Include(item => item.ChecklistItems)
             .AsNoTracking();
 
-        if (_currentUser?.UserId is { } userId && !_currentUser.IsAdmin)
+        if (!_currentUser.IsAdmin)
         {
-            query = query.Where(item => item.UserId == userId);
+            query = query.Where(item => item.UserId == _currentUser.UserId.Value);
         }
 
         var analyses = await query

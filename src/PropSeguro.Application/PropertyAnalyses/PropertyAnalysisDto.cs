@@ -1,5 +1,6 @@
 using PropSeguro.Application.Common;
 using PropSeguro.Domain.PropertyAnalyses;
+using System.Text.Json.Serialization;
 
 namespace PropSeguro.Application.PropertyAnalyses;
 
@@ -42,6 +43,7 @@ public sealed record PropertyAnalysisDto(
     string? CoverImageFileName,
     string? CoverImageContentType,
     long? CoverImageSizeBytes,
+    [property: JsonIgnore]
     string? CoverImageStoragePath,
     DateTime? CoverImageUploadedAtUtc,
     string? CoverImageUrl,
@@ -132,6 +134,7 @@ public sealed record PropertyDocumentDto(
     string FileName,
     string ContentType,
     long SizeBytes,
+    [property: JsonIgnore]
     string StoragePath,
     bool HasExtractedText,
     string? ExtractedText,

@@ -1,11 +1,18 @@
 using MediatR;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi;
+using Microsoft.Extensions.Options;
 using System.ComponentModel.DataAnnotations;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.RateLimiting;
 using PropSeguro.Api.Auth;
+using PropSeguro.Api.Email;
+using PropSeguro.Api.Storage;
 using System.Text.Json.Serialization;
 using PropSeguro.Application;
 using PropSeguro.Application.Common;
@@ -31,26 +38,133 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    var bearerScheme = new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Description = "Ingresá el JWT con el formato: Bearer {token}",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT"
+    };
+
+    options.AddSecurityDefinition("Bearer", bearerScheme);
+    options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecuritySchemeReference("Bearer", document, null)] = []
+    });
+});
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("DevelopmentFrontend", policy =>
+    options.AddPolicy("ConfiguredFrontend", policy =>
     {
+        var allowedOrigins = builder.Configuration
+            .GetSection("Cors:AllowedOrigins")
+            .Get<string[]>()?
+            .Where(origin => !string.IsNullOrWhiteSpace(origin))
+            .ToArray() ?? [];
+
+        if (allowedOrigins.Length == 0 && builder.Environment.IsDevelopment())
+        {
+            allowedOrigins = ["http://localhost:5173"];
+        }
+
+        if (allowedOrigins.Length > 0)
+        {
+            policy.WithOrigins(allowedOrigins);
+        }
+        else
+        {
+            policy.SetIsOriginAllowed(_ => false);
+        }
+
         policy
-            .WithOrigins("http://localhost:5173")
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
 });
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response.WriteAsJsonAsync(new
+        {
+            error = "Demasiados intentos. Probá nuevamente más tarde."
+        }, cancellationToken);
+    };
+
+    options.AddPolicy("Login", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            Program.BuildRateLimitPartitionKey(context, "login"),
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+
+    options.AddPolicy("BetaAccessRequest", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            Program.BuildRateLimitPartitionKey(context, "beta-access-request"),
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromHours(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+});
 var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
+Program.ValidateJwtOptions(jwtOptions, builder.Environment);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserContext, HttpCurrentUserContext>();
 builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
 builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
+builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection("Email"));
+builder.Services.AddSingleton<IBetaInvitationEmailService, BetaInvitationEmailService>();
+builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Storage"));
+
+var storageOptions = builder.Configuration.GetSection("Storage").Get<StorageOptions>() ?? new StorageOptions();
+if (Program.IsLocalStorageProvider(storageOptions.Provider))
+{
+    builder.Services.AddSingleton<IPropertyFileStorage, LocalPropertyFileStorage>();
+    builder.Services.AddSingleton<IFileStorageService>(provider => provider.GetRequiredService<IPropertyFileStorage>());
+}
+else if (Program.IsAzureBlobStorageProvider(storageOptions.Provider))
+{
+    Program.ValidateAzureBlobStorageOptions(storageOptions);
+    builder.Services.AddSingleton<IPropertyFileStorage, AzureBlobPropertyFileStorage>();
+    builder.Services.AddSingleton<IFileStorageService>(provider => provider.GetRequiredService<IPropertyFileStorage>());
+}
+else
+{
+    throw new InvalidOperationException("Storage:Provider must be either Local or AzureBlob.");
+}
+
+var emailOptions = builder.Configuration.GetSection("Email").Get<EmailOptions>() ?? new EmailOptions();
+if (Program.IsNullEmailProvider(emailOptions.Provider))
+{
+    builder.Services.AddSingleton<IEmailSender, NullEmailSender>();
+}
+else if (Program.IsSmtpEmailProvider(emailOptions.Provider))
+{
+    Program.ValidateSmtpEmailOptions(emailOptions);
+    builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+}
+else
+{
+    throw new InvalidOperationException("Email:Provider must be either Null or Smtp.");
+}
+
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -62,9 +176,36 @@ builder.Services
             ValidateAudience = true,
             ValidAudience = jwtOptions.Audience,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SigningKey)),
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.EffectiveSigningKey)),
             ValidateLifetime = true,
+            NameClaimType = ClaimTypes.Name,
+            RoleClaimType = ClaimTypes.Role,
             ClockSkew = TimeSpan.FromMinutes(2)
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var userIdValue = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+
+                if (!Guid.TryParse(userIdValue, out var userId))
+                {
+                    context.Fail("Invalid user token.");
+                    return;
+                }
+
+                var dbContext = context.HttpContext.RequestServices.GetRequiredService<ApplicationDbContext>();
+                var userStatus = await dbContext.Users
+                    .AsNoTracking()
+                    .Where(user => user.Id == userId)
+                    .Select(user => (UserStatus?)user.Status)
+                    .FirstOrDefaultAsync(context.HttpContext.RequestAborted);
+
+                if (userStatus is null || userStatus == UserStatus.Disabled)
+                {
+                    context.Fail("User is not active.");
+                }
+            }
         };
     });
 builder.Services.AddAuthorization(options =>
@@ -80,16 +221,17 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
-    app.UseCors("DevelopmentFrontend");
 }
 
 app.UseHttpsRedirection();
+app.UseCors("ConfiguredFrontend");
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-if (app.Environment.IsDevelopment())
+if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("SeedAdmin:Enabled"))
 {
-    await Program.SeedDevelopmentAdminAsync(app.Services, app.Configuration);
+    await Program.SeedDevelopmentAdminAsync(app.Services, app.Configuration, app.Environment);
 }
 
 var propertyAnalyses = app.MapGroup("/api/property-analyses")
@@ -129,6 +271,7 @@ app.MapPost("/api/auth/login", async (
         UserResponse.FromUser(user)));
 })
 .AllowAnonymous()
+.RequireRateLimiting("Login")
 .WithTags("Auth")
 .WithName("Login");
 
@@ -166,8 +309,102 @@ app.MapPost("/api/beta-access-requests", async (
     }
 })
 .AllowAnonymous()
+.RequireRateLimiting("BetaAccessRequest")
 .WithTags("Beta Access")
 .WithName("CreateBetaAccessRequest");
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapPost("/api/dev/email-test", async (
+        SendTestEmailRequest request,
+        IEmailSender emailSender,
+        IConfiguration configuration,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken) =>
+    {
+        if (!new EmailAddressAttribute().IsValid(request.ToEmail))
+        {
+            return Results.BadRequest(new { error = "Email inválido." });
+        }
+
+        var emailOptions = configuration.GetSection("Email").Get<EmailOptions>() ?? new EmailOptions();
+
+        if (!Program.IsSmtpEmailProvider(emailOptions.Provider))
+        {
+            return Results.BadRequest(new
+            {
+                emailSent = false,
+                message = "El proveedor SMTP no está habilitado. Configurá Email:Provider=Smtp para probar el envío real."
+            });
+        }
+
+        try
+        {
+            await emailSender.SendAsync(new EmailMessage(
+                request.ToEmail,
+                request.ToName,
+                "Prueba SMTP PropSegura",
+                """
+                <p>Este es un correo de prueba de PropSegura.</p>
+                <p>Si recibiste este mensaje, la conexión SMTP está funcionando.</p>
+                """,
+                "Este es un correo de prueba de PropSegura. Si recibiste este mensaje, la conexión SMTP está funcionando."),
+                cancellationToken);
+
+            return Results.Ok(new
+            {
+                emailSent = true,
+                message = $"Correo de prueba enviado a {request.ToEmail}."
+            });
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "Development SMTP test failed for provider {Provider}, host {Host}, port {Port}, to {ToEmail}.",
+                emailOptions.Provider,
+                emailOptions.Smtp.Host,
+                emailOptions.Smtp.Port,
+                request.ToEmail);
+
+            return Results.BadRequest(new
+            {
+                emailSent = false,
+                message = "No se pudo enviar el correo de prueba. Revisá host, puerto, SSL, usuario y contraseña SMTP.",
+                diagnostics = Program.BuildSmtpDiagnostics(emailOptions, exception)
+            });
+        }
+    })
+    .RequireAuthorization("AdminOnly")
+    .WithTags("Development")
+    .WithName("SendDevelopmentTestEmail");
+
+    app.MapGet("/api/dev/config/email", (
+        IConfiguration configuration) =>
+    {
+        var emailOptions = configuration.GetSection("Email").Get<EmailOptions>() ?? new EmailOptions();
+
+        return Results.Ok(new
+        {
+            provider = emailOptions.Provider,
+            fromEmail = emailOptions.FromEmail,
+            smtp = new
+            {
+                host = emailOptions.Smtp.Host,
+                port = emailOptions.Smtp.Port,
+                enableSsl = emailOptions.Smtp.EnableSsl,
+                username = emailOptions.Smtp.Username,
+                passwordConfigured = !Program.IsPlaceholderSecret(emailOptions.Smtp.Password),
+                passwordLooksPlaceholder = Program.IsPlaceholderSecret(emailOptions.Smtp.Password),
+                passwordSource = Program.FindConfigurationValueSource(configuration, "Email:Smtp:Password")
+            },
+            configurationProviders = Program.GetConfigurationProviderNames(configuration)
+        });
+    })
+    .RequireAuthorization("AdminOnly")
+    .WithTags("Development")
+    .WithName("GetDevelopmentEmailConfiguration");
+}
 
 var admin = app.MapGroup("/api/admin")
     .RequireAuthorization("AdminOnly")
@@ -189,6 +426,10 @@ admin.MapPost("/beta-access-requests/{id:guid}/approve", async (
     Guid id,
     ApplicationDbContext dbContext,
     IPasswordHasher passwordHasher,
+    IBetaInvitationEmailService betaInvitationEmailService,
+    IWebHostEnvironment environment,
+    IConfiguration configuration,
+    ILogger<Program> logger,
     CancellationToken cancellationToken) =>
 {
     var betaRequest = await dbContext.BetaAccessRequests.FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
@@ -198,24 +439,88 @@ admin.MapPost("/beta-access-requests/{id:guid}/approve", async (
         return Results.NotFound();
     }
 
-    betaRequest.Approve();
     var email = AppUser.NormalizeEmail(betaRequest.Email);
     var user = await dbContext.Users.FirstOrDefaultAsync(item => item.Email == email, cancellationToken);
+
+    if (betaRequest.Status == BetaAccessRequestStatus.Approved)
+    {
+        return Results.Ok(new ApproveBetaAccessResponse(
+            betaRequest.Id,
+            betaRequest.Status.ToString(),
+            user?.Id ?? Guid.Empty,
+            email,
+            false,
+            null,
+            "La solicitud ya estaba aprobada.",
+            null));
+    }
+
     string? temporaryPassword = null;
+    var shouldSendInvitation = false;
 
     if (user is null)
     {
         temporaryPassword = Program.CreateTemporaryPassword();
         user = new AppUser(email, betaRequest.FullName, passwordHasher.Hash(temporaryPassword), UserRole.User, UserStatus.Invited);
         dbContext.Users.Add(user);
+        shouldSendInvitation = true;
+    }
+    else if (user.Status != UserStatus.Active)
+    {
+        temporaryPassword = Program.CreateTemporaryPassword();
+        user.UpdatePasswordHash(passwordHasher.Hash(temporaryPassword));
+        user.Enable();
+        shouldSendInvitation = true;
     }
 
+    betaRequest.Approve();
     await dbContext.SaveChangesAsync(cancellationToken);
 
+    var emailOptions = configuration.GetSection("Email").Get<EmailOptions>() ?? new EmailOptions();
+    var emailSent = false;
+    string? emailError = null;
+    string? message = null;
+
+    if (shouldSendInvitation && temporaryPassword is not null && Program.IsNullEmailProvider(emailOptions.Provider))
+    {
+        message = "Email deshabilitado en este entorno. Copiá la contraseña temporal manualmente.";
+    }
+    else if (shouldSendInvitation && temporaryPassword is not null)
+    {
+        try
+        {
+            var loginUrl = Program.BuildLoginUrl(configuration);
+            await betaInvitationEmailService.SendInvitationAsync(user, temporaryPassword, loginUrl, cancellationToken);
+            emailSent = true;
+            message = $"Invitación enviada a {user.Email}.";
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Could not send beta invitation email to {Email}.", user.Email);
+            emailError = "No se pudo enviar el email de invitación.";
+            message = "Usuario aprobado, pero no se pudo enviar el email.";
+        }
+    }
+    else
+    {
+        message = "Solicitud aprobada. El usuario ya existía, por eso no se generó una nueva contraseña temporal.";
+    }
+
+    var shouldReturnTemporaryPassword = Program.ShouldReturnTemporaryPassword(
+        environment,
+        emailOptions,
+        emailSent,
+        temporaryPassword);
+
     return Results.Ok(new ApproveBetaAccessResponse(
-        BetaAccessRequestResponse.FromRequest(betaRequest),
-        UserResponse.FromUser(user),
-        temporaryPassword));
+        betaRequest.Id,
+        betaRequest.Status.ToString(),
+        user.Id,
+        user.Email,
+        emailSent,
+        emailError,
+        message,
+        shouldReturnTemporaryPassword ? temporaryPassword : null));
 })
 .WithName("ApproveBetaAccessRequest");
 
@@ -259,6 +564,11 @@ admin.MapPost("/users", async (
     if (!new EmailAddressAttribute().IsValid(request.Email))
     {
         return Results.BadRequest(new { error = "Email invalido." });
+    }
+
+    if (!Program.IsValidPassword(request.Password))
+    {
+        return Results.BadRequest(new { error = "La contrasena debe tener al menos 8 caracteres, una letra y un numero." });
     }
 
     var email = AppUser.NormalizeEmail(request.Email);
@@ -340,7 +650,8 @@ app.MapPost("/api/listing-imports", async (
     }
 })
 .WithTags("Listing Imports")
-.WithName("ImportListing");
+.WithName("ImportListing")
+.RequireAuthorization();
 
 propertyAnalyses.MapPost("/", async (
     CreatePropertyAnalysisRequest request,
@@ -412,6 +723,60 @@ propertyAnalyses.MapGet("/{id:guid}/report", async (
 })
 .WithName("GetPropertyAnalysisReport");
 
+propertyAnalyses.MapGet("/{id:guid}/report/pdf", async (
+    Guid id,
+    IPropertyReportBuilder reportBuilder,
+    IPropertyReportPdfGenerator pdfGenerator,
+    IPropertyFileStorage fileStorage,
+    CancellationToken cancellationToken) =>
+{
+    var report = await reportBuilder.BuildAsync(id, cancellationToken);
+
+    if (report is null)
+    {
+        return Results.NotFound();
+    }
+
+    string? temporaryCoverPath = null;
+
+    try
+    {
+        if (!string.IsNullOrWhiteSpace(report.CoverSection.CoverImageStoragePath))
+        {
+            var storedCover = await fileStorage.OpenReadAsync(report.CoverSection.CoverImageStoragePath, cancellationToken);
+
+            if (storedCover is not null)
+            {
+                await using (storedCover.Content)
+                {
+                    temporaryCoverPath = Program.CreateTemporaryFilePath(Program.GetFileExtensionFromStoragePath(report.CoverSection.CoverImageStoragePath));
+                    await using var temporaryCover = File.Create(temporaryCoverPath);
+                    await storedCover.Content.CopyToAsync(temporaryCover, cancellationToken);
+                }
+            }
+        }
+
+        var reportForPdf = temporaryCoverPath is null
+            ? report
+            : report with
+            {
+                CoverSection = report.CoverSection with
+                {
+                    CoverImageStoragePath = temporaryCoverPath
+                }
+            };
+
+        var bytes = pdfGenerator.Generate(reportForPdf);
+        var fileName = Program.BuildReportFileName(report.PropertySummary.Title, report.GeneratedAtUtc);
+        return Results.File(bytes, "application/pdf", fileName);
+    }
+    finally
+    {
+        Program.TryDeleteFile(temporaryCoverPath);
+    }
+})
+.WithName("DownloadPropertyAnalysisReportPdf");
+
 propertyAnalyses.MapPut("/{id:guid}", async (
     Guid id,
     UpdatePropertyAnalysisRequest request,
@@ -458,7 +823,7 @@ propertyAnalyses.MapPut("/{id:guid}", async (
 propertyAnalyses.MapDelete("/{id:guid}", async (
     Guid id,
     ISender sender,
-    IWebHostEnvironment environment,
+    IPropertyFileStorage fileStorage,
     CancellationToken cancellationToken) =>
 {
     var deleted = await sender.Send(new DeletePropertyAnalysisCommand(id), cancellationToken);
@@ -468,18 +833,9 @@ propertyAnalyses.MapDelete("/{id:guid}", async (
         return Results.NotFound();
     }
 
-    var analysisDirectory = Path.Combine(
-        Program.GetStorageRoot(environment.ContentRootPath),
-        "storage",
-        "property-analyses",
-        id.ToString("D"));
-
     try
     {
-        if (Directory.Exists(analysisDirectory))
-        {
-            Directory.Delete(analysisDirectory, recursive: true);
-        }
+        await fileStorage.DeletePrefixAsync(Program.BuildAnalysisStoragePrefix(id), cancellationToken);
     }
     catch
     {
@@ -494,7 +850,8 @@ propertyAnalyses.MapPost("/{id:guid}/cover-image", async (
     Guid id,
     HttpRequest request,
     ISender sender,
-    IWebHostEnvironment environment,
+    IPropertyFileStorage fileStorage,
+    IOptions<StorageOptions> storageOptions,
     CancellationToken cancellationToken) =>
 {
     if (!request.HasFormContentType)
@@ -523,11 +880,12 @@ propertyAnalyses.MapPost("/{id:guid}/cover-image", async (
         });
     }
 
-    if (file.Length > Program.MaxCoverImageSizeBytes)
+    var maxImageSizeBytes = Program.GetMaxImageSizeBytes(storageOptions.Value);
+    if (file.Length > maxImageSizeBytes)
     {
         return Results.BadRequest(new
         {
-            error = "The cover image must be 5 MB or smaller."
+            error = $"The cover image must be {Program.FormatMegabytes(maxImageSizeBytes)} MB or smaller."
         });
     }
 
@@ -541,20 +899,14 @@ propertyAnalyses.MapPost("/{id:guid}/cover-image", async (
 
     var extension = Program.GetCoverImageExtension(file.ContentType, file.FileName);
     var safeFileName = $"cover-{Guid.NewGuid():N}{extension}";
-    var storagePath = string.Join(
-        '/',
-        "storage",
-        "property-analyses",
-        id.ToString("D"),
+    var storagePath = fileStorage.CreateStoragePath(
+        Program.BuildAnalysisStoragePrefix(id),
         "cover",
         safeFileName);
-    var fullPath = Path.Combine(Program.GetStorageRoot(environment.ContentRootPath), storagePath.Replace('/', Path.DirectorySeparatorChar));
 
-    Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-
-    await using (var stream = File.Create(fullPath))
+    await using (var stream = file.OpenReadStream())
     {
-        await file.CopyToAsync(stream, cancellationToken);
+        await fileStorage.SaveAsync(storagePath, stream, file.ContentType, cancellationToken);
     }
 
     try
@@ -568,7 +920,7 @@ propertyAnalyses.MapPost("/{id:guid}/cover-image", async (
 
         if (result is null)
         {
-            File.Delete(fullPath);
+            await fileStorage.DeleteAsync(storagePath, cancellationToken);
             return Results.NotFound();
         }
 
@@ -576,7 +928,7 @@ propertyAnalyses.MapPost("/{id:guid}/cover-image", async (
     }
     catch (ArgumentException exception)
     {
-        File.Delete(fullPath);
+        await fileStorage.DeleteAsync(storagePath, cancellationToken);
         return Results.BadRequest(new
         {
             error = exception.Message
@@ -584,7 +936,7 @@ propertyAnalyses.MapPost("/{id:guid}/cover-image", async (
     }
     catch
     {
-        File.Delete(fullPath);
+        await fileStorage.DeleteAsync(storagePath, cancellationToken);
         throw;
     }
 })
@@ -593,7 +945,7 @@ propertyAnalyses.MapPost("/{id:guid}/cover-image", async (
 propertyAnalyses.MapGet("/{id:guid}/cover-image", async Task<IResult> (
     Guid id,
     ISender sender,
-    IWebHostEnvironment environment,
+    IPropertyFileStorage fileStorage,
     CancellationToken cancellationToken) =>
 {
     var analysis = await sender.Send(new GetPropertyAnalysisQuery(id), cancellationToken);
@@ -603,26 +955,56 @@ propertyAnalyses.MapGet("/{id:guid}/cover-image", async Task<IResult> (
         return Results.NotFound();
     }
 
-    var fullPath = Path.Combine(
-        Program.GetStorageRoot(environment.ContentRootPath),
-        analysis.CoverImageStoragePath.Replace('/', Path.DirectorySeparatorChar));
-
-    if (!File.Exists(fullPath))
+    var storedFile = await fileStorage.OpenReadAsync(analysis.CoverImageStoragePath, cancellationToken);
+    if (storedFile is null)
     {
         return Results.NotFound();
     }
 
-    var bytes = await File.ReadAllBytesAsync(fullPath, cancellationToken);
-    return Results.File(bytes, analysis.CoverImageContentType, analysis.CoverImageFileName);
+    return Results.File(storedFile.Content, analysis.CoverImageContentType, analysis.CoverImageFileName);
 })
-.AllowAnonymous()
 .WithName("GetPropertyCoverImage");
+
+propertyAnalyses.MapGet("/{analysisId:guid}/documents/{documentId:guid}/file", async Task<IResult> (
+    Guid analysisId,
+    Guid documentId,
+    ApplicationDbContext dbContext,
+    ICurrentUserContext currentUser,
+    IPropertyFileStorage fileStorage,
+    CancellationToken cancellationToken) =>
+{
+    var analysis = await dbContext.PropertyAnalyses
+        .Include(item => item.Documents)
+        .AsNoTracking()
+        .FirstOrDefaultAsync(item => item.Id == analysisId, cancellationToken);
+
+    if (analysis is null || !currentUser.CanAccess(analysis))
+    {
+        return Results.NotFound();
+    }
+
+    var document = analysis.Documents.FirstOrDefault(item => item.Id == documentId);
+    if (document is null)
+    {
+        return Results.NotFound();
+    }
+
+    var storedFile = await fileStorage.OpenReadAsync(document.StoragePath, cancellationToken);
+    if (storedFile is null)
+    {
+        return Results.NotFound();
+    }
+
+    return Results.File(storedFile.Content, document.ContentType, document.FileName);
+})
+.WithName("GetPropertyDocumentFile");
 
 propertyAnalyses.MapPost("/{id:guid}/documents", async (
     Guid id,
     HttpRequest request,
     ISender sender,
-    IWebHostEnvironment environment,
+    IPropertyFileStorage fileStorage,
+    IOptions<StorageOptions> storageOptions,
     IPdfTextExtractor pdfTextExtractor,
     IPdfOcrTextExtractor pdfOcrTextExtractor,
     CancellationToken cancellationToken) =>
@@ -655,22 +1037,39 @@ propertyAnalyses.MapPost("/{id:guid}/documents", async (
         });
     }
 
+    if (!Program.IsAllowedPdfContentType(file.ContentType))
+    {
+        return Results.BadRequest(new
+        {
+            error = "Only PDF documents are allowed."
+        });
+    }
+
+    var maxPdfSizeBytes = Program.GetMaxPdfSizeBytes(storageOptions.Value);
+    if (file.Length > maxPdfSizeBytes)
+    {
+        return Results.BadRequest(new
+        {
+            error = $"The PDF document must be {Program.FormatMegabytes(maxPdfSizeBytes)} MB or smaller."
+        });
+    }
+
     var documentId = Guid.NewGuid();
-    var storagePath = string.Join(
-        '/',
-        "storage",
-        "property-analyses",
-        id.ToString("D"),
+    var storagePath = fileStorage.CreateStoragePath(
+        Program.BuildAnalysisStoragePrefix(id),
         "documents",
         documentId.ToString("D"),
         "original.pdf");
-    var fullPath = Path.Combine(Program.GetStorageRoot(environment.ContentRootPath), storagePath.Replace('/', Path.DirectorySeparatorChar));
+    var temporaryFilePath = Program.CreateTemporaryFilePath(".pdf");
 
-    Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-
-    await using (var stream = File.Create(fullPath))
+    await using (var stream = File.Create(temporaryFilePath))
     {
         await file.CopyToAsync(stream, cancellationToken);
+    }
+
+    await using (var stream = File.OpenRead(temporaryFilePath))
+    {
+        await fileStorage.SaveAsync(storagePath, stream, file.ContentType, cancellationToken);
     }
 
     string? extractedText = null;
@@ -682,12 +1081,12 @@ propertyAnalyses.MapPost("/{id:guid}/documents", async (
     {
         try
         {
-            extractedText = await pdfTextExtractor.ExtractTextAsync(fullPath, cancellationToken);
+            extractedText = await pdfTextExtractor.ExtractTextAsync(temporaryFilePath, cancellationToken);
             textExtractionQuality = DocumentTextQualityEvaluator.Evaluate(documentType, extractedText);
 
             if (DocumentTextQualityEvaluator.ShouldAttemptOcr(documentType, extractedText))
             {
-                var ocrResult = await pdfOcrTextExtractor.ExtractTextAsync(fullPath, documentType, cancellationToken);
+                var ocrResult = await pdfOcrTextExtractor.ExtractTextAsync(temporaryFilePath, documentType, cancellationToken);
 
                 if (!string.IsNullOrWhiteSpace(ocrResult.Text))
                 {
@@ -721,7 +1120,7 @@ propertyAnalyses.MapPost("/{id:guid}/documents", async (
 
         if (result is null)
         {
-            File.Delete(fullPath);
+            await fileStorage.DeleteAsync(storagePath, cancellationToken);
             return Results.NotFound();
         }
 
@@ -729,7 +1128,7 @@ propertyAnalyses.MapPost("/{id:guid}/documents", async (
     }
     catch (ArgumentException exception)
     {
-        File.Delete(fullPath);
+        await fileStorage.DeleteAsync(storagePath, cancellationToken);
         return Results.BadRequest(new
         {
             error = exception.Message
@@ -737,8 +1136,12 @@ propertyAnalyses.MapPost("/{id:guid}/documents", async (
     }
     catch
     {
-        File.Delete(fullPath);
+        await fileStorage.DeleteAsync(storagePath, cancellationToken);
         throw;
+    }
+    finally
+    {
+        Program.TryDeleteFile(temporaryFilePath);
     }
 })
 .WithName("AddPropertyDocument");
@@ -831,6 +1234,8 @@ public sealed record LoginRequest(string Email, string Password);
 
 public sealed record LoginResponse(string Token, UserResponse User);
 
+public sealed record SendTestEmailRequest(string ToEmail, string? ToName);
+
 public sealed record UserResponse(
     Guid Id,
     string Email,
@@ -885,8 +1290,13 @@ public sealed record BetaAccessRequestResponse(
 }
 
 public sealed record ApproveBetaAccessResponse(
-    BetaAccessRequestResponse Request,
-    UserResponse User,
+    Guid RequestId,
+    string Status,
+    Guid UserId,
+    string Email,
+    bool EmailSent,
+    string? EmailError,
+    string? Message,
     string? TemporaryPassword);
 
 public sealed record CreateUserRequest(
@@ -899,11 +1309,12 @@ public partial class Program
 {
     public const long MaxCoverImageSizeBytes = 5 * 1024 * 1024;
 
-    internal static async Task SeedDevelopmentAdminAsync(IServiceProvider services, IConfiguration configuration)
+    internal static async Task SeedDevelopmentAdminAsync(IServiceProvider services, IConfiguration configuration, IWebHostEnvironment environment)
     {
         var seedEmail = configuration["SeedAdmin:Email"];
         var seedFullName = configuration["SeedAdmin:FullName"];
         var seedPassword = configuration["SeedAdmin:Password"];
+        var seedEnabled = configuration.GetValue<bool>("SeedAdmin:Enabled");
 
         if (string.IsNullOrWhiteSpace(seedEmail) ||
             string.IsNullOrWhiteSpace(seedFullName) ||
@@ -912,29 +1323,331 @@ public partial class Program
             return;
         }
 
+        if (environment.IsProduction() && seedEnabled && !IsValidPassword(seedPassword))
+        {
+            throw new InvalidOperationException("SeedAdmin is enabled in Production but SeedAdmin:Password is not strong enough.");
+        }
+
         await using var scope = services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+        var normalizedEmail = AppUser.NormalizeEmail(seedEmail);
+        var adminUser = await dbContext.Users.FirstOrDefaultAsync(user => user.Email == normalizedEmail);
 
-        if (await dbContext.Users.AnyAsync())
+        if (adminUser is null)
+        {
+            adminUser = new AppUser(
+                seedEmail,
+                seedFullName,
+                passwordHasher.Hash(seedPassword),
+                UserRole.Admin,
+                UserStatus.Active);
+            dbContext.Users.Add(adminUser);
+        }
+        else
+        {
+            adminUser.UpdateProfile(seedFullName);
+            adminUser.UpdatePasswordHash(passwordHasher.Hash(seedPassword));
+            adminUser.MakeAdmin();
+            adminUser.Enable();
+        }
+
+        await dbContext.SaveChangesAsync();
+
+        if (environment.IsDevelopment() && configuration.GetValue<bool>("DemoData:Enabled"))
+        {
+            await SeedDevelopmentDemoPropertyAsync(scope.ServiceProvider, adminUser);
+        }
+    }
+
+    private static async Task SeedDevelopmentDemoPropertyAsync(IServiceProvider services, AppUser owner)
+    {
+        var dbContext = services.GetRequiredService<ApplicationDbContext>();
+        var fileStorage = services.GetRequiredService<IPropertyFileStorage>();
+        const string demoTitle = "Demo - Venta Departamento 2 Amb. en Palermo";
+
+        var exists = await dbContext.PropertyAnalyses
+            .AsNoTracking()
+            .AnyAsync(analysis => analysis.UserId == owner.Id && analysis.Title == demoTitle);
+
+        if (exists)
         {
             return;
         }
 
-        var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
-        var adminUser = new AppUser(
-            seedEmail,
-            seedFullName,
-            passwordHasher.Hash(seedPassword),
-            UserRole.Admin,
-            UserStatus.Active);
+        var analysis = new PropertyAnalysis(
+            demoTitle,
+            "https://www.zonaprop.com.ar/propiedades/demo-palermo-propsegura.html",
+            "Sánchez de Bustamante 1638",
+            "Palermo",
+            80000m,
+            100000m,
+            40m,
+            36m,
+            2,
+            1,
+            1,
+            10,
+            3,
+            "B",
+            "3B",
+            true,
+            true,
+            true,
+            PropertyCondition.Good,
+            "Propiedad demo para revisar el flujo completo de oportunidad, documentación, hallazgos e informe.");
 
-        dbContext.Users.Add(adminUser);
+        analysis.AssignOwner(owner.Id);
+        analysis.RunInitialAnalysis();
+
+        var prefix = BuildAnalysisStoragePrefix(analysis.Id);
+        var coverBytes = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAIAAADYYG7QAAAAvklEQVR4nO3YQQqAIBBF0dn9j9YhKPiQrbmQfSBbH0YRKwgjb2athU29ow0g/e8AkABIAECAhVOEX1Yp21Ztz9X6yIrINucl5ml5hPfdLHDg41g2rnTjYSLOa9o6OsHibSAo+hUMR6ufR6ifSTOd8HE0Kdpc5jvtouAQjGWqYIEFA8wzBL3BggHmGYLeYMGA8wxBb7BggHmGoDdYMMC8Q9AbLBhgniHoDRYMqB9JJ+Ro0dpoFMCyN1KxQhW5ZQq5JQo5JQo5JQr5AdpFKJVMf8cSAAAAAElFTkSuQmCC");
+        var coverStoragePath = fileStorage.CreateStoragePath(prefix, "cover", "demo-cover.png");
+
+        await using (var coverStream = new MemoryStream(coverBytes))
+        {
+            await fileStorage.SaveAsync(coverStoragePath, coverStream, "image/png", CancellationToken.None);
+        }
+
+        analysis.SetCoverImage("demo-cover.png", "image/png", coverBytes.Length, coverStoragePath);
+
+        var expenseDocument = analysis.AddDocument(
+            Guid.NewGuid(),
+            DocumentType.Expenses,
+            "expensas-demo.pdf",
+            "application/pdf",
+            512,
+            fileStorage.CreateStoragePath(prefix, "documents", Guid.NewGuid().ToString("D"), "original.pdf"));
+        var expenseText = """
+        Liquidación de expensas unidad 3B. Expensas ordinarias $100.000.
+        Se informa fondo de reserva, reparación de ascensor, impermeabilización de fachada y expensas extraordinarias por obra pendiente.
+        La administración registra morosidad general del consorcio y solicita revisar actas.
+        """;
+        expenseDocument.StoreExtractedText(expenseText, TextExtractionQuality.Good);
+        var expenseFindings = expenseDocument.CompleteAnalysis(null);
+
+        var reservationDocument = analysis.AddDocument(
+            Guid.NewGuid(),
+            DocumentType.ReservationAgreement,
+            "reserva-demo.pdf",
+            "application/pdf",
+            512,
+            fileStorage.CreateStoragePath(prefix, "documents", Guid.NewGuid().ToString("D"), "original.pdf"));
+        var reservationText = """
+        Reserva de compra por el inmueble sito en Sánchez de Bustamante 1638, Palermo.
+        La suma entregada será no reintegrable si el comprador desiste. La inmobiliaria retendrá la reserva y podrá aplicar penalidad.
+        El plazo para avanzar será de 72 horas. La documentación será presentada posteriormente.
+        """;
+        reservationDocument.StoreExtractedText(reservationText, TextExtractionQuality.Good);
+        var reservationFindings = reservationDocument.CompleteAnalysis(null);
+        var findings = expenseFindings.Concat(reservationFindings).ToArray();
+
+        analysis.RecalculateProtectionScore(findings);
+        dbContext.PropertyAnalyses.Add(analysis);
+        dbContext.DocumentFindings.AddRange(findings);
+
+        var demoPdfBytes = Encoding.UTF8.GetBytes("%PDF-1.4\n% PropSegura demo placeholder\n%%EOF");
+        foreach (var document in analysis.Documents)
+        {
+            await using var documentStream = new MemoryStream(demoPdfBytes);
+            await fileStorage.SaveAsync(document.StoragePath, documentStream, "application/pdf", CancellationToken.None);
+        }
+
         await dbContext.SaveChangesAsync();
     }
 
     internal static string CreateTemporaryPassword()
     {
         return $"PS-{Convert.ToHexString(RandomNumberGenerator.GetBytes(8)).ToLowerInvariant()}";
+    }
+
+    internal static string BuildRateLimitPartitionKey(HttpContext context, string policyName)
+    {
+        var remoteIp = context.Connection.RemoteIpAddress?.ToString();
+
+        if (string.IsNullOrWhiteSpace(remoteIp))
+        {
+            remoteIp = "unknown";
+        }
+
+        return $"{policyName}:{remoteIp}";
+    }
+
+    internal static bool IsValidPassword(string? password)
+    {
+        return !string.IsNullOrWhiteSpace(password) &&
+            password.Length >= 8 &&
+            password.Any(char.IsLetter) &&
+            password.Any(char.IsDigit);
+    }
+
+    internal static bool IsNullEmailProvider(string? provider)
+    {
+        return string.IsNullOrWhiteSpace(provider) ||
+            provider.Equals("Null", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsSmtpEmailProvider(string? provider)
+    {
+        return provider?.Equals("Smtp", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    internal static bool IsLocalStorageProvider(string? provider)
+    {
+        return string.IsNullOrWhiteSpace(provider) ||
+            provider.Equals("Local", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsAzureBlobStorageProvider(string? provider)
+    {
+        return provider?.Equals("AzureBlob", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    internal static void ValidateAzureBlobStorageOptions(StorageOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(options.AzureBlob.ConnectionString) ||
+            string.IsNullOrWhiteSpace(options.AzureBlob.ContainerName))
+        {
+            throw new InvalidOperationException("Storage provider AzureBlob requires Storage:AzureBlob:ConnectionString and Storage:AzureBlob:ContainerName.");
+        }
+    }
+
+    internal static void ValidateSmtpEmailOptions(EmailOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(options.FromEmail) ||
+            string.IsNullOrWhiteSpace(options.Smtp.Host) ||
+            options.Smtp.Port <= 0 ||
+            string.IsNullOrWhiteSpace(options.Smtp.Username) ||
+            Program.IsPlaceholderSecret(options.Smtp.Password))
+        {
+            throw new InvalidOperationException("Email provider Smtp requires Email:FromEmail and complete Email:Smtp configuration. Set Email:Smtp:Password from user secrets in Development or environment variables in Production.");
+        }
+    }
+
+    internal static object BuildSmtpDiagnostics(EmailOptions options, Exception exception)
+    {
+        return new
+        {
+            provider = options.Provider,
+            fromEmail = options.FromEmail,
+            host = options.Smtp.Host,
+            port = options.Smtp.Port,
+            enableSsl = options.Smtp.EnableSsl,
+            username = options.Smtp.Username,
+            passwordConfigured = !string.IsNullOrWhiteSpace(options.Smtp.Password) &&
+                !Program.IsPlaceholderSecret(options.Smtp.Password),
+            passwordLooksPlaceholder = Program.IsPlaceholderSecret(options.Smtp.Password),
+            errorType = exception.GetType().Name,
+            errorMessage = Program.BuildSafeSmtpErrorMessage(exception)
+        };
+    }
+
+    internal static string? FindConfigurationValueSource(IConfiguration configuration, string key)
+    {
+        if (configuration is not IConfigurationRoot configurationRoot)
+        {
+            return null;
+        }
+
+        foreach (var provider in configurationRoot.Providers.Reverse())
+        {
+            if (provider.TryGet(key, out var value))
+            {
+                return string.IsNullOrWhiteSpace(value)
+                    ? $"{provider.GetType().Name} (empty)"
+                    : provider.GetType().Name;
+            }
+        }
+
+        return null;
+    }
+
+    internal static IReadOnlyCollection<string> GetConfigurationProviderNames(IConfiguration configuration)
+    {
+        return configuration is IConfigurationRoot configurationRoot
+            ? configurationRoot.Providers.Select(provider => provider.GetType().Name).ToArray()
+            : [];
+    }
+
+    internal static bool IsPlaceholderSecret(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ||
+            value.Contains("__SET_", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("<password", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("TU_PASSWORD", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static string BuildSafeSmtpErrorMessage(Exception exception)
+    {
+        var message = exception.Message;
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return "Error SMTP sin mensaje.";
+        }
+
+        return message
+            .Replace("\r", " ", StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal);
+    }
+
+    internal static void ValidateJwtOptions(JwtOptions options, IWebHostEnvironment environment)
+    {
+        if (string.IsNullOrWhiteSpace(options.Issuer) ||
+            string.IsNullOrWhiteSpace(options.Audience) ||
+            string.IsNullOrWhiteSpace(options.EffectiveSigningKey))
+        {
+            throw new InvalidOperationException("Jwt configuration requires Issuer, Audience and Secret or SigningKey.");
+        }
+
+        if (!environment.IsProduction())
+        {
+            return;
+        }
+
+        var signingKey = options.EffectiveSigningKey.Trim();
+        var isPlaceholder = signingKey.Contains("__SET_", StringComparison.OrdinalIgnoreCase) ||
+            signingKey.StartsWith("dev-only", StringComparison.OrdinalIgnoreCase);
+
+        if (isPlaceholder || Encoding.UTF8.GetByteCount(signingKey) < 32)
+        {
+            throw new InvalidOperationException("Production Jwt:SigningKey must be set from a strong secret with at least 32 bytes.");
+        }
+    }
+
+    internal static string BuildLoginUrl(IConfiguration configuration)
+    {
+        var explicitLoginUrl = configuration["Frontend:LoginUrl"];
+
+        if (!string.IsNullOrWhiteSpace(explicitLoginUrl))
+        {
+            return explicitLoginUrl.Trim();
+        }
+
+        var baseUrl = configuration["Frontend:BaseUrl"];
+
+        if (!string.IsNullOrWhiteSpace(baseUrl))
+        {
+            return $"{baseUrl.Trim().TrimEnd('/')}/login";
+        }
+
+        return "http://localhost:5173/login";
+    }
+
+    internal static bool ShouldReturnTemporaryPassword(
+        IWebHostEnvironment environment,
+        EmailOptions emailOptions,
+        bool emailSent,
+        string? temporaryPassword)
+    {
+        if (string.IsNullOrWhiteSpace(temporaryPassword))
+        {
+            return false;
+        }
+
+        return environment.IsDevelopment() ||
+            Program.IsNullEmailProvider(emailOptions.Provider);
     }
 
     internal static string GetStorageRoot(string contentRootPath)
@@ -954,11 +1667,77 @@ public partial class Program
         return contentRootPath;
     }
 
+    internal static string BuildAnalysisStoragePrefix(Guid analysisId)
+    {
+        return Program.BuildStoragePath("property-analyses", analysisId.ToString("D"));
+    }
+
+    internal static string BuildStoragePath(params string[] segments)
+    {
+        return string.Join(
+            '/',
+            segments
+                .Where(segment => !string.IsNullOrWhiteSpace(segment))
+                .Select(segment => segment.Trim().Trim('/', '\\')));
+    }
+
+    internal static string CreateTemporaryFilePath(string? extension)
+    {
+        var normalizedExtension = string.IsNullOrWhiteSpace(extension)
+            ? ".tmp"
+            : extension.StartsWith('.') ? extension : $".{extension}";
+
+        return Path.Combine(Path.GetTempPath(), $"propsegura-{Guid.NewGuid():N}{normalizedExtension}");
+    }
+
+    internal static void TryDeleteFile(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Temporary file cleanup is best-effort.
+        }
+    }
+
     internal static bool IsAllowedCoverImageContentType(string? contentType)
     {
         return string.Equals(contentType, "image/jpeg", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(contentType, "image/png", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(contentType, "image/webp", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsAllowedPdfContentType(string? contentType)
+    {
+        return string.Equals(contentType, "application/pdf", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static long GetMaxImageSizeBytes(StorageOptions options)
+    {
+        return options.MaxImageSizeBytes > 0 ? options.MaxImageSizeBytes : MaxCoverImageSizeBytes;
+    }
+
+    internal static long GetMaxPdfSizeBytes(StorageOptions options)
+    {
+        return options.MaxPdfSizeBytes > 0 ? options.MaxPdfSizeBytes : 15 * 1024 * 1024;
+    }
+
+    internal static string FormatMegabytes(long bytes)
+    {
+        var megabytes = bytes / 1024m / 1024m;
+        return megabytes % 1 == 0
+            ? megabytes.ToString("0")
+            : megabytes.ToString("0.##");
     }
 
     internal static string GetCoverImageExtension(string contentType, string? fileName)
@@ -992,5 +1771,27 @@ public partial class Program
             "image/webp" => ".webp",
             _ => ".img"
         };
+    }
+
+    internal static string GetFileExtensionFromStoragePath(string storagePath)
+    {
+        var extension = Path.GetExtension(storagePath);
+        return string.IsNullOrWhiteSpace(extension) ? ".tmp" : extension;
+    }
+
+    internal static string BuildReportFileName(string title, DateTime generatedAtUtc)
+    {
+        var safeTitle = new string(title
+            .Where(character => char.IsLetterOrDigit(character) || character is '-' or '_' or ' ')
+            .ToArray())
+            .Trim()
+            .Replace(' ', '-');
+
+        if (string.IsNullOrWhiteSpace(safeTitle))
+        {
+            safeTitle = "Propiedad";
+        }
+
+        return $"PropSegura-{safeTitle}-{generatedAtUtc:yyyyMMdd}.pdf";
     }
 }

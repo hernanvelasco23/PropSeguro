@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using PropSeguro.Application.Common;
 using PropSeguro.Application.PropertyAnalyses.ListPropertyAnalyses;
 using PropSeguro.Application.PropertyAnalyses.UpdatePropertyAnalysis;
 using PropSeguro.Domain.PropertyAnalyses;
@@ -12,11 +13,12 @@ public sealed class PropertyAnalysisDashboardTests
     public async Task List_returns_property_analysis_summaries()
     {
         await using var dbContext = CreateDbContext();
-        var analysis = CreateAnalysis();
+        var ownerId = Guid.NewGuid();
+        var analysis = CreateAnalysis(ownerId);
         dbContext.PropertyAnalyses.Add(analysis);
         await dbContext.SaveChangesAsync();
 
-        var handler = new ListPropertyAnalysesQueryHandler(dbContext);
+        var handler = new ListPropertyAnalysesQueryHandler(dbContext, User(ownerId));
 
         var result = await handler.Handle(new ListPropertyAnalysesQuery(), CancellationToken.None);
 
@@ -31,12 +33,13 @@ public sealed class PropertyAnalysisDashboardTests
     public async Task Update_recalculates_opportunity_score()
     {
         await using var dbContext = CreateDbContext();
-        var analysis = CreateAnalysis(priceUsd: 230000);
+        var ownerId = Guid.NewGuid();
+        var analysis = CreateAnalysis(ownerId, priceUsd: 230000);
         dbContext.PropertyAnalyses.Add(analysis);
         await dbContext.SaveChangesAsync();
         var initialScore = analysis.OpportunityScore;
 
-        var handler = new UpdatePropertyAnalysisCommandHandler(dbContext);
+        var handler = new UpdatePropertyAnalysisCommandHandler(dbContext, User(ownerId));
 
         var result = await handler.Handle(new UpdatePropertyAnalysisCommand(
             analysis.Id,
@@ -70,7 +73,8 @@ public sealed class PropertyAnalysisDashboardTests
     public async Task Update_preserves_documents_and_findings()
     {
         await using var dbContext = CreateDbContext();
-        var analysis = CreateAnalysis();
+        var ownerId = Guid.NewGuid();
+        var analysis = CreateAnalysis(ownerId);
         var document = new PropertyDocument(Guid.NewGuid(), analysis.Id, DocumentType.ReservationAgreement, "reserva.pdf", "application/pdf", 1024, "storage/test/original.pdf");
         var finding = new DocumentFinding(document.Id, analysis.Id, FindingSeverity.Critical, FindingCategory.Legal, "Reserva no reintegrable", "Texto riesgoso.");
         dbContext.PropertyAnalyses.Add(analysis);
@@ -78,7 +82,7 @@ public sealed class PropertyAnalysisDashboardTests
         dbContext.DocumentFindings.Add(finding);
         await dbContext.SaveChangesAsync();
 
-        var handler = new UpdatePropertyAnalysisCommandHandler(dbContext);
+        var handler = new UpdatePropertyAnalysisCommandHandler(dbContext, User(ownerId));
 
         var result = await handler.Handle(new UpdatePropertyAnalysisCommand(
             analysis.Id,
@@ -112,7 +116,8 @@ public sealed class PropertyAnalysisDashboardTests
     public async Task List_summary_includes_missing_documents_and_finding_counts()
     {
         await using var dbContext = CreateDbContext();
-        var analysis = CreateAnalysis();
+        var ownerId = Guid.NewGuid();
+        var analysis = CreateAnalysis(ownerId);
         var document = new PropertyDocument(Guid.NewGuid(), analysis.Id, DocumentType.Expenses, "expensas.pdf", "application/pdf", 1024, "storage/test/original.pdf");
         var finding = new DocumentFinding(document.Id, analysis.Id, FindingSeverity.Critical, FindingCategory.Financial, "Deuda", "Texto con deuda.");
         analysis.ChecklistItems.First(item => item.DocumentType == DocumentType.Expenses).MarkProvided();
@@ -121,7 +126,7 @@ public sealed class PropertyAnalysisDashboardTests
         dbContext.DocumentFindings.Add(finding);
         await dbContext.SaveChangesAsync();
 
-        var handler = new ListPropertyAnalysesQueryHandler(dbContext);
+        var handler = new ListPropertyAnalysesQueryHandler(dbContext, User(ownerId));
 
         var result = await handler.Handle(new ListPropertyAnalysesQuery(), CancellationToken.None);
 
@@ -140,7 +145,7 @@ public sealed class PropertyAnalysisDashboardTests
         return new ApplicationDbContext(options);
     }
 
-    private static PropertyAnalysis CreateAnalysis(decimal priceUsd = 180000)
+    private static PropertyAnalysis CreateAnalysis(Guid ownerId, decimal priceUsd = 180000)
     {
         var analysis = new PropertyAnalysis(
             "Departamento",
@@ -165,6 +170,29 @@ public sealed class PropertyAnalysisDashboardTests
             null);
 
         analysis.RunInitialAnalysis();
+        analysis.AssignOwner(ownerId);
         return analysis;
+    }
+
+    private static TestCurrentUserContext User(Guid userId)
+    {
+        return new TestCurrentUserContext(userId, isAdmin: false);
+    }
+
+    private sealed class TestCurrentUserContext : ICurrentUserContext
+    {
+        public TestCurrentUserContext(Guid userId, bool isAdmin)
+        {
+            UserId = userId;
+            IsAdmin = isAdmin;
+        }
+
+        public Guid? UserId { get; }
+
+        public string? Email => "test@propsegura.local";
+
+        public string? Role => IsAdmin ? "Admin" : "User";
+
+        public bool IsAdmin { get; }
     }
 }

@@ -8,7 +8,7 @@ public static class PropertyAccess
     {
         if (currentUser?.UserId is null)
         {
-            return true;
+            return false;
         }
 
         return currentUser.IsAdmin || analysis.UserId == currentUser.UserId.Value;

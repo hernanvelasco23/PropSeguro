@@ -1,16 +1,19 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using MediatR;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
-using Microsoft.IdentityModel.Tokens;
 using PropSeguro.Application.Common;
 using PropSeguro.Application.PropertyAnalyses;
+using PropSeguro.Application.PropertyAnalyses.AddPropertyDocument;
 using PropSeguro.Application.PropertyAnalyses.GetPropertyAnalysis;
 using PropSeguro.Application.PropertyAnalyses.UploadPropertyCoverImage;
+using PropSeguro.Api.Auth;
+using PropSeguro.Api.Storage;
+using PropSeguro.Domain.Users;
 using PropSeguro.Infrastructure.Persistence;
 
 namespace PropSeguro.Domain.Tests;
@@ -20,16 +23,7 @@ public sealed class PropertyAnalysisEndpointTests
     [Fact]
     public async Task GetPropertyAnalysis_without_token_returns_unauthorized()
     {
-        await using var factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder =>
-            {
-                builder.ConfigureServices(services =>
-                {
-                    ConfigureInMemoryDatabase(services);
-                    services.AddSingleton<ISender, NotFoundSender>();
-                });
-            });
-
+        await using var factory = CreateFactory(new NotFoundSender());
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync($"/api/property-analyses/{Guid.NewGuid()}");
@@ -42,18 +36,10 @@ public sealed class PropertyAnalysisEndpointTests
     {
         var analysisId = Guid.NewGuid();
         var sender = new CoverImageSender(analysisId);
-        await using var factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder =>
-            {
-                builder.ConfigureServices(services =>
-                {
-                    ConfigureInMemoryDatabase(services);
-                    services.AddSingleton<ISender>(sender);
-                });
-            });
+        await using var factory = CreateFactory(sender);
 
         using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", CreateToken());
+        Authorize(factory, client);
         using var content = new MultipartFormDataContent();
         var image = new ByteArrayContent([0x89, 0x50, 0x4E, 0x47]);
         image.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
@@ -75,18 +61,10 @@ public sealed class PropertyAnalysisEndpointTests
     public async Task Upload_cover_image_rejects_invalid_content_type()
     {
         var analysisId = Guid.NewGuid();
-        await using var factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder =>
-            {
-                builder.ConfigureServices(services =>
-                {
-                    ConfigureInMemoryDatabase(services);
-                    services.AddSingleton<ISender>(new CoverImageSender(analysisId));
-                });
-            });
+        await using var factory = CreateFactory(new CoverImageSender(analysisId));
 
         using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", CreateToken());
+        Authorize(factory, client);
         using var content = new MultipartFormDataContent();
         var image = new ByteArrayContent([1, 2, 3]);
         image.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/plain");
@@ -101,18 +79,10 @@ public sealed class PropertyAnalysisEndpointTests
     public async Task Upload_cover_image_rejects_files_larger_than_5_mb()
     {
         var analysisId = Guid.NewGuid();
-        await using var factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder =>
-            {
-                builder.ConfigureServices(services =>
-                {
-                    ConfigureInMemoryDatabase(services);
-                    services.AddSingleton<ISender>(new CoverImageSender(analysisId));
-                });
-            });
+        await using var factory = CreateFactory(new CoverImageSender(analysisId));
 
         using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", CreateToken());
+        Authorize(factory, client);
         using var content = new MultipartFormDataContent();
         var image = new ByteArrayContent(new byte[Program.MaxCoverImageSizeBytes + 1]);
         image.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
@@ -126,18 +96,10 @@ public sealed class PropertyAnalysisEndpointTests
     [Fact]
     public async Task Upload_cover_image_with_unknown_property_returns_not_found()
     {
-        await using var factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder =>
-            {
-                builder.ConfigureServices(services =>
-                {
-                    ConfigureInMemoryDatabase(services);
-                    services.AddSingleton<ISender, NotFoundSender>();
-                });
-            });
+        await using var factory = CreateFactory(new NotFoundSender());
 
         using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", CreateToken());
+        Authorize(factory, client);
         using var content = new MultipartFormDataContent();
         var image = new ByteArrayContent([0xFF, 0xD8, 0xFF]);
         image.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
@@ -183,22 +145,103 @@ public sealed class PropertyAnalysisEndpointTests
         }
     }
 
-    private static string CreateToken()
+    private static void Authorize(WebApplicationFactory<Program> factory, HttpClient client)
     {
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("dev-only-change-this-signing-key-for-propsegura-private-beta-2026"));
-        var token = new JwtSecurityToken(
-            issuer: "PropSegura",
-            audience: "PropSegura",
-            claims:
-            [
-                new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString("D")),
-                new Claim(ClaimTypes.Email, "test@propsegura.local"),
-                new Claim(ClaimTypes.Role, "Admin")
-            ],
-            expires: DateTime.UtcNow.AddHours(1),
-            signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
+        using var scope = factory.Services.CreateScope();
+        var tokenService = scope.ServiceProvider.GetRequiredService<IJwtTokenService>();
+        var token = tokenService.CreateToken(new AppUser("test@propsegura.local", "Test User", "hash", UserRole.Admin, UserStatus.Active));
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+    }
 
-        return new JwtSecurityTokenHandler().WriteToken(token);
+    [Fact]
+    public async Task Upload_document_rejects_invalid_content_type()
+    {
+        var analysisId = Guid.NewGuid();
+        await using var factory = CreateFactory(new DocumentUploadSender(analysisId));
+        using var client = factory.CreateClient();
+        Authorize(factory, client);
+        using var content = new MultipartFormDataContent();
+        content.Add(new StringContent("ReservationAgreement"), "documentType");
+        var document = new ByteArrayContent([1, 2, 3]);
+        document.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/plain");
+        content.Add(document, "file", "reserva.txt");
+
+        var response = await client.PostAsync($"/api/property-analyses/{analysisId}/documents", content);
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Upload_document_rejects_oversized_pdf()
+    {
+        var analysisId = Guid.NewGuid();
+        await using var factory = CreateFactory(new DocumentUploadSender(analysisId), maxPdfSizeBytes: 3);
+        using var client = factory.CreateClient();
+        Authorize(factory, client);
+        using var content = new MultipartFormDataContent();
+        content.Add(new StringContent("ReservationAgreement"), "documentType");
+        var document = new ByteArrayContent([1, 2, 3, 4]);
+        document.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+        content.Add(document, "file", "reserva.pdf");
+
+        var response = await client.PostAsync($"/api/property-analyses/{analysisId}/documents", content);
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Upload_document_neutralizes_path_traversal_file_name()
+    {
+        var analysisId = Guid.NewGuid();
+        var sender = new DocumentUploadSender(analysisId);
+        await using var factory = CreateFactory(sender);
+        using var client = factory.CreateClient();
+        Authorize(factory, client);
+        using var content = new MultipartFormDataContent();
+        content.Add(new StringContent("ReservationAgreement"), "documentType");
+        var document = new ByteArrayContent([0x25, 0x50, 0x44, 0x46]);
+        document.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+        content.Add(document, "file", "..\\..\\evil.pdf");
+
+        var response = await client.PostAsync($"/api/property-analyses/{analysisId}/documents", content);
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(sender.LastAddCommand);
+        Assert.Equal("evil.pdf", sender.LastAddCommand.FileName);
+        Assert.DoesNotContain("..", sender.LastAddCommand.StoragePath);
+        Assert.Contains($"/{analysisId:D}/documents/", sender.LastAddCommand.StoragePath);
+
+        DeleteUploadedFile(sender.LastAddCommand.StoragePath);
+    }
+
+    private static WebApplicationFactory<Program> CreateFactory(ISender sender, long? maxPdfSizeBytes = null, long? maxImageSizeBytes = null)
+    {
+        return new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("Jwt:Issuer", "PropSegura.Tests");
+                builder.UseSetting("Jwt:Audience", "PropSegura.Tests");
+                builder.UseSetting("Jwt:SigningKey", "propsegura-tests-signing-key-with-more-than-32-bytes");
+                builder.UseSetting("Email:Provider", "Null");
+                builder.UseSetting("Storage:Provider", "Local");
+                builder.UseSetting("Storage:RootPath", "storage");
+
+                if (maxPdfSizeBytes.HasValue)
+                {
+                    builder.UseSetting("Storage:MaxPdfSizeBytes", maxPdfSizeBytes.Value.ToString());
+                }
+
+                if (maxImageSizeBytes.HasValue)
+                {
+                    builder.UseSetting("Storage:MaxImageSizeBytes", maxImageSizeBytes.Value.ToString());
+                }
+
+                builder.ConfigureServices(services =>
+                {
+                    ConfigureInMemoryDatabase(services);
+                    services.AddSingleton(sender);
+                });
+            });
     }
 
     private static void ConfigureInMemoryDatabase(IServiceCollection services)
@@ -209,6 +252,13 @@ public sealed class PropertyAnalysisEndpointTests
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseInMemoryDatabase("PropertyEndpointTests-" + Guid.NewGuid()));
         services.AddScoped<IApplicationDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>());
+        services
+            .AddDataProtection()
+            .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(Path.GetTempPath(), "propsegura-test-keys")));
+        services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
+        {
+            options.Events = new JwtBearerEvents();
+        });
     }
 
     private static void DeleteUploadedFile(string storagePath)
@@ -285,7 +335,7 @@ public sealed class PropertyAnalysisEndpointTests
             yield break;
         }
 
-        private static PropertyAnalysisDto CreateDto(
+        public static PropertyAnalysisDto CreateDto(
             Guid id,
             string? coverFileName = null,
             string? coverContentType = null,
@@ -342,6 +392,54 @@ public sealed class PropertyAnalysisEndpointTests
                 null,
                 DateTime.UtcNow,
                 DateTime.UtcNow);
+        }
+    }
+
+    private sealed class DocumentUploadSender(Guid analysisId) : ISender
+    {
+        public AddPropertyDocumentCommand? LastAddCommand { get; private set; }
+
+        public Task<TResponse> Send<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default)
+        {
+            if (request is GetPropertyAnalysisQuery getQuery && getQuery.Id == analysisId)
+            {
+                return Task.FromResult((TResponse)(object)CoverImageSender.CreateDto(analysisId));
+            }
+
+            if (request is AddPropertyDocumentCommand addCommand && addCommand.PropertyAnalysisId == analysisId)
+            {
+                LastAddCommand = addCommand;
+                return Task.FromResult((TResponse)(object)CoverImageSender.CreateDto(analysisId));
+            }
+
+            return Task.FromResult(default(TResponse)!);
+        }
+
+        public Task Send<TRequest>(TRequest request, CancellationToken cancellationToken = default)
+            where TRequest : IRequest
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task<object?> Send(object request, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<object?>(null);
+        }
+
+        public IAsyncEnumerable<TResponse> CreateStream<TResponse>(IStreamRequest<TResponse> request, CancellationToken cancellationToken = default)
+        {
+            return EmptyAsync<TResponse>();
+        }
+
+        public IAsyncEnumerable<object?> CreateStream(object request, CancellationToken cancellationToken = default)
+        {
+            return EmptyAsync<object?>();
+        }
+
+        private static async IAsyncEnumerable<T> EmptyAsync<T>()
+        {
+            await Task.CompletedTask;
+            yield break;
         }
     }
 }
