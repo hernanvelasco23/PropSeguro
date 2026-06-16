@@ -6,6 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using Microsoft.Extensions.Options;
 using System.ComponentModel.DataAnnotations;
+using System.Data.Common;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -217,6 +218,7 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
+// Temporarily enabled in Production while deployment configuration is being debugged.
 app.UseSwagger();
 app.UseSwaggerUI();
 
@@ -230,6 +232,21 @@ if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("SeedAdm
 {
     await Program.SeedDevelopmentAdminAsync(app.Services, app.Configuration, app.Environment);
 }
+
+app.MapGet("/health", () => Results.Text("OK"))
+    .AllowAnonymous()
+    .WithTags("Diagnostics")
+    .WithName("Health");
+
+app.MapGet("/debug/config", (
+    IConfiguration configuration,
+    IWebHostEnvironment environment) =>
+{
+    return Results.Ok(Program.BuildDebugConfiguration(configuration, environment));
+})
+.AllowAnonymous()
+.WithTags("Diagnostics")
+.WithName("GetDebugConfiguration");
 
 var propertyAnalyses = app.MapGroup("/api/property-analyses")
     .WithTags("Property Analyses")
@@ -1565,6 +1582,69 @@ public partial class Program
         return configuration is IConfigurationRoot configurationRoot
             ? configurationRoot.Providers.Select(provider => provider.GetType().Name).ToArray()
             : [];
+    }
+
+    internal static IReadOnlyDictionary<string, object?> BuildDebugConfiguration(IConfiguration configuration, IWebHostEnvironment environment)
+    {
+        var connectionString = configuration.GetConnectionString("DefaultConnection");
+        var jwtOptions = configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
+        var emailOptions = configuration.GetSection("Email").Get<EmailOptions>() ?? new EmailOptions();
+        var storageOptions = configuration.GetSection("Storage").Get<StorageOptions>() ?? new StorageOptions();
+
+        return new Dictionary<string, object?>
+        {
+            ["Environment"] = environment.EnvironmentName,
+            ["HasConnectionString"] = !string.IsNullOrWhiteSpace(connectionString) &&
+                !Program.IsPlaceholderSecret(connectionString),
+            ["ConnectionStringDatabaseName"] = Program.TryGetDatabaseName(connectionString),
+            ["JwtIssuer"] = jwtOptions.Issuer,
+            ["JwtAudience"] = jwtOptions.Audience,
+            ["HasJwtSecret"] = !string.IsNullOrWhiteSpace(jwtOptions.Secret) &&
+                !Program.IsPlaceholderSecret(jwtOptions.Secret),
+            ["HasJwtSigningKey"] = !string.IsNullOrWhiteSpace(jwtOptions.SigningKey) &&
+                !Program.IsPlaceholderSecret(jwtOptions.SigningKey),
+            ["EmailProvider"] = emailOptions.Provider,
+            ["EmailFromEmail"] = emailOptions.FromEmail,
+            ["EmailSmtpHost"] = emailOptions.Smtp.Host,
+            ["EmailSmtpPort"] = emailOptions.Smtp.Port,
+            ["HasEmailSmtpUsername"] = !string.IsNullOrWhiteSpace(emailOptions.Smtp.Username),
+            ["HasEmailSmtpPassword"] = !string.IsNullOrWhiteSpace(emailOptions.Smtp.Password) &&
+                !Program.IsPlaceholderSecret(emailOptions.Smtp.Password),
+            ["StorageProvider"] = storageOptions.Provider,
+            ["HasStorageAzureBlobConnectionString"] = !string.IsNullOrWhiteSpace(storageOptions.AzureBlob.ConnectionString) &&
+                !Program.IsPlaceholderSecret(storageOptions.AzureBlob.ConnectionString),
+            ["StorageAzureBlobContainerName"] = storageOptions.AzureBlob.ContainerName
+        };
+    }
+
+    internal static string? TryGetDatabaseName(string? connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString) || Program.IsPlaceholderSecret(connectionString))
+        {
+            return null;
+        }
+
+        try
+        {
+            var builder = new DbConnectionStringBuilder
+            {
+                ConnectionString = connectionString
+            };
+
+            return Program.TryGetConnectionStringValue(builder, "Initial Catalog") ??
+                Program.TryGetConnectionStringValue(builder, "Database");
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static string? TryGetConnectionStringValue(DbConnectionStringBuilder builder, string key)
+    {
+        return builder.TryGetValue(key, out var value) && value is not null
+            ? value.ToString()
+            : null;
     }
 
     internal static bool IsPlaceholderSecret(string? value)
