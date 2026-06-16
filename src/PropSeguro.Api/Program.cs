@@ -35,16 +35,6 @@ using PropSeguro.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
-if (builder.Configuration.GetValue<bool>("Diagnostics:MinimalPipeline"))
-{
-    var minimalApp = builder.Build();
-
-    minimalApp.MapGet("/ping", () => Results.Text("pong"));
-
-    minimalApp.Run();
-    return;
-}
-
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 
@@ -227,30 +217,54 @@ builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
 var minimalPipeline = builder.Configuration.GetValue<bool>("Diagnostics:MinimalPipeline");
+var enableSwagger = !builder.Environment.IsProduction() ||
+    builder.Configuration.GetValue<bool>("Diagnostics:EnableSwagger");
+var enableCors = !builder.Environment.IsProduction() ||
+    builder.Configuration.GetValue<bool>("Diagnostics:EnableCors");
+var enableRateLimiter = !builder.Environment.IsProduction() ||
+    builder.Configuration.GetValue<bool>("Diagnostics:EnableRateLimiter");
+var enableAuth = !builder.Environment.IsProduction() ||
+    builder.Configuration.GetValue<bool>("Diagnostics:EnableAuth");
+var enableSeedAdmin = !builder.Environment.IsProduction() ||
+    builder.Configuration.GetValue<bool>("Diagnostics:EnableSeedAdmin");
 
 var app = builder.Build();
 
+app.MapGet("/ping", () => Results.Text("pong")).AllowAnonymous();
+
 if (minimalPipeline)
 {
-    app.MapGet("/ping", () => Results.Text("pong")).AllowAnonymous();
     app.Run();
     return;
 }
 
-// Temporarily enabled in Production while deployment configuration is being debugged.
-app.UseSwagger();
-app.UseSwaggerUI();
+if (enableSwagger)
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
 if (!app.Environment.IsProduction())
 {
     app.UseHttpsRedirection();
 }
-app.UseCors("ConfiguredFrontend");
-app.UseRateLimiter();
-app.UseAuthentication();
-app.UseAuthorization();
+if (enableCors)
+{
+    app.UseCors("ConfiguredFrontend");
+}
 
-if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("SeedAdmin:Enabled"))
+if (enableRateLimiter)
+{
+    app.UseRateLimiter();
+}
+
+if (enableAuth)
+{
+    app.UseAuthentication();
+    app.UseAuthorization();
+}
+
+if (enableSeedAdmin && (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("SeedAdmin:Enabled")))
 {
     await Program.SeedDevelopmentAdminAsync(app.Services, app.Configuration, app.Environment);
 }
