@@ -227,7 +227,7 @@ if (!app.Environment.IsProduction())
     app.UseHttpsRedirection();
 }
 app.UseCors("ConfiguredFrontend");
-app.UseRateLimiter();
+//app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
