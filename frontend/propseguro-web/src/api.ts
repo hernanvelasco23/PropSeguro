@@ -1,3 +1,5 @@
+import { API_BASE_URL } from './config';
+
 export type DocumentType =
   | 'Expenses'
   | 'AssemblyMinutes'
@@ -428,7 +430,6 @@ export type PropertyReportDocumentStatus = {
   isFuture: boolean;
 };
 
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5288').replace(/\/$/, '');
 const AUTH_TOKEN_KEY = 'propsegura.authToken';
 const AUTH_USER_KEY = 'propsegura.authUser';
 export const AUTH_SESSION_EXPIRED_EVENT = 'propsegura:session-expired';
