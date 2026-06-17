@@ -4,6 +4,8 @@ function trimTrailingSlash(value: string) {
   return value.replace(/\/$/, '');
 }
 
+function isLocalHost2() { }
+
 function isLocalhost() {
   const hostname = window.location.hostname;
 
