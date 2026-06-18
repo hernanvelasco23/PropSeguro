@@ -74,7 +74,7 @@ var effectiveAllowedOrigins = configuredAllowedOrigins.Length == 0 && builder.En
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("ConfiguredFrontend", policy =>
+    options.AddPolicy("DefaultCorsPolicy", policy =>
     {
         if (effectiveAllowedOrigins.Length > 0)
         {
@@ -219,9 +219,6 @@ builder.Services.AddInfrastructure(builder.Configuration);
 var minimalPipeline = builder.Configuration.GetValue<bool>("Diagnostics:MinimalPipeline");
 var enableSwagger = !builder.Environment.IsProduction() ||
     builder.Configuration.GetValue<bool>("Diagnostics:EnableSwagger");
-var enableCors = !builder.Environment.IsProduction() ||
-    builder.Configuration.GetValue<bool>("Diagnostics:EnableCors") ||
-    effectiveAllowedOrigins.Length > 0;
 var enableRateLimiter = !builder.Environment.IsProduction() ||
     builder.Configuration.GetValue<bool>("Diagnostics:EnableRateLimiter");
 var enableAuth = !builder.Environment.IsProduction() ||
@@ -240,6 +237,13 @@ if (minimalPipeline)
     return;
 }
 
+startupLogger.LogInformation(
+    "CORS DefaultCorsPolicy allowed origins: {AllowedOrigins}",
+    effectiveAllowedOrigins.Length > 0 ? string.Join(", ", effectiveAllowedOrigins) : "(none)");
+
+app.UseRouting();
+app.UseCors("DefaultCorsPolicy");
+
 if (enableSwagger)
 {
     app.UseSwagger();
@@ -249,16 +253,6 @@ if (enableSwagger)
 if (!app.Environment.IsProduction())
 {
     app.UseHttpsRedirection();
-}
-
-startupLogger.LogInformation(
-    "CORS ConfiguredFrontend enabled: {CorsEnabled}. Allowed origins: {AllowedOrigins}",
-    enableCors,
-    effectiveAllowedOrigins.Length > 0 ? string.Join(", ", effectiveAllowedOrigins) : "(none)");
-
-if (enableCors)
-{
-    app.UseCors("ConfiguredFrontend");
 }
 
 if (enableRateLimiter)
