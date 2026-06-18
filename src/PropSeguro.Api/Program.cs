@@ -61,24 +61,24 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
+
+var configuredAllowedOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>()?
+    .Where(origin => !string.IsNullOrWhiteSpace(origin))
+    .ToArray() ?? [];
+
+var effectiveAllowedOrigins = configuredAllowedOrigins.Length == 0 && builder.Environment.IsDevelopment()
+    ? ["http://localhost:5173"]
+    : configuredAllowedOrigins;
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("ConfiguredFrontend", policy =>
     {
-        var allowedOrigins = builder.Configuration
-            .GetSection("Cors:AllowedOrigins")
-            .Get<string[]>()?
-            .Where(origin => !string.IsNullOrWhiteSpace(origin))
-            .ToArray() ?? [];
-
-        if (allowedOrigins.Length == 0 && builder.Environment.IsDevelopment())
+        if (effectiveAllowedOrigins.Length > 0)
         {
-            allowedOrigins = ["http://localhost:5173"];
-        }
-
-        if (allowedOrigins.Length > 0)
-        {
-            policy.WithOrigins(allowedOrigins);
+            policy.WithOrigins(effectiveAllowedOrigins);
         }
         else
         {
@@ -220,7 +220,8 @@ var minimalPipeline = builder.Configuration.GetValue<bool>("Diagnostics:MinimalP
 var enableSwagger = !builder.Environment.IsProduction() ||
     builder.Configuration.GetValue<bool>("Diagnostics:EnableSwagger");
 var enableCors = !builder.Environment.IsProduction() ||
-    builder.Configuration.GetValue<bool>("Diagnostics:EnableCors");
+    builder.Configuration.GetValue<bool>("Diagnostics:EnableCors") ||
+    effectiveAllowedOrigins.Length > 0;
 var enableRateLimiter = !builder.Environment.IsProduction() ||
     builder.Configuration.GetValue<bool>("Diagnostics:EnableRateLimiter");
 var enableAuth = !builder.Environment.IsProduction() ||
@@ -229,6 +230,7 @@ var enableSeedAdmin = !builder.Environment.IsProduction() ||
     builder.Configuration.GetValue<bool>("Diagnostics:EnableSeedAdmin");
 
 var app = builder.Build();
+var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 
 app.MapGet("/ping", () => Results.Text("pong")).AllowAnonymous();
 
@@ -248,6 +250,12 @@ if (!app.Environment.IsProduction())
 {
     app.UseHttpsRedirection();
 }
+
+startupLogger.LogInformation(
+    "CORS ConfiguredFrontend enabled: {CorsEnabled}. Allowed origins: {AllowedOrigins}",
+    enableCors,
+    effectiveAllowedOrigins.Length > 0 ? string.Join(", ", effectiveAllowedOrigins) : "(none)");
+
 if (enableCors)
 {
     app.UseCors("ConfiguredFrontend");
