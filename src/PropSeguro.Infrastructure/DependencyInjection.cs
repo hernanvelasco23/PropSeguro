@@ -32,21 +32,11 @@ public static class DependencyInjection
 
         services.AddScoped<IApplicationDbContext>(provider =>
             provider.GetRequiredService<ApplicationDbContext>());
-        services.Configure<PdfOcrOptions>(options =>
+        services.Configure<DocumentIntelligenceOptions>(options =>
         {
-            options.PdfToPpmPath = configuration["PdfOcr:PdfToPpmPath"];
-            options.TessDataPath = configuration["PdfOcr:TessDataPath"];
-            options.Language = configuration["PdfOcr:Language"] ?? options.Language;
-
-            if (int.TryParse(configuration["PdfOcr:Dpi"], out var dpi))
-            {
-                options.Dpi = dpi;
-            }
-
-            if (int.TryParse(configuration["PdfOcr:MaxPages"], out var maxPages))
-            {
-                options.MaxPages = maxPages;
-            }
+            options.Endpoint = configuration["DocumentIntelligence:Endpoint"];
+            options.ApiKey = configuration["DocumentIntelligence:ApiKey"];
+            options.Model = configuration["DocumentIntelligence:Model"] ?? options.Model;
         });
         services.AddScoped<IPdfTextExtractor, PdfPigTextExtractor>();
         services.AddScoped<IPdfOcrTextExtractor, PdfOcrTextExtractor>();

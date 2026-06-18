@@ -55,7 +55,7 @@ public sealed class AddPropertyDocumentCommandHandler : IRequestHandler<AddPrope
         {
             document.MarkExtractionFailed(request.ExtractionError);
         }
-        else if (string.Equals(request.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+        else if (IsExtractableContentType(request.ContentType))
         {
             document.StoreExtractedText(
                 request.ExtractedText,
@@ -85,5 +85,12 @@ public sealed class AddPropertyDocumentCommandHandler : IRequestHandler<AddPrope
             .FirstAsync(item => item.Id == request.PropertyAnalysisId, cancellationToken);
 
         return updatedAnalysis.ToDto(documentFindings);
+    }
+
+    private static bool IsExtractableContentType(string? contentType)
+    {
+        return string.Equals(contentType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(contentType, "image/jpeg", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(contentType, "image/png", StringComparison.OrdinalIgnoreCase);
     }
 }
