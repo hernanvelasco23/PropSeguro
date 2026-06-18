@@ -1207,109 +1207,132 @@ propertyAnalyses.MapPost("/{id:guid}/documents", async (
     IOptions<StorageOptions> storageOptions,
     IPdfTextExtractor pdfTextExtractor,
     IPdfOcrTextExtractor pdfOcrTextExtractor,
+    ILogger<Program> logger,
     CancellationToken cancellationToken) =>
 {
-    if (!request.HasFormContentType)
-    {
-        return Results.BadRequest(new
-        {
-            error = "The request must be multipart/form-data."
-        });
-    }
-
-    var form = await request.ReadFormAsync(cancellationToken);
-    var documentTypeValue = form["documentType"].ToString();
-    var file = form.Files.GetFile("file");
-
-    if (!Enum.TryParse<DocumentType>(documentTypeValue, ignoreCase: true, out var documentType))
-    {
-        return Results.BadRequest(new
-        {
-            error = "A valid documentType is required."
-        });
-    }
-
-    if (file is null || file.Length == 0)
-    {
-        return Results.BadRequest(new
-        {
-            error = "A PDF file is required."
-        });
-    }
-
-    if (!Program.IsAllowedPdfContentType(file.ContentType))
-    {
-        return Results.BadRequest(new
-        {
-            error = "Only PDF documents are allowed."
-        });
-    }
-
-    var maxPdfSizeBytes = Program.GetMaxPdfSizeBytes(storageOptions.Value);
-    if (file.Length > maxPdfSizeBytes)
-    {
-        return Results.BadRequest(new
-        {
-            error = $"The PDF document must be {Program.FormatMegabytes(maxPdfSizeBytes)} MB or smaller."
-        });
-    }
-
-    var documentId = Guid.NewGuid();
-    var storagePath = fileStorage.CreateStoragePath(
-        Program.BuildAnalysisStoragePrefix(id),
-        "documents",
-        documentId.ToString("D"),
-        "original.pdf");
-    var temporaryFilePath = Program.CreateTemporaryFilePath(".pdf");
-
-    await using (var stream = File.Create(temporaryFilePath))
-    {
-        await file.CopyToAsync(stream, cancellationToken);
-    }
-
-    await using (var stream = File.OpenRead(temporaryFilePath))
-    {
-        await fileStorage.SaveAsync(storagePath, stream, file.ContentType, cancellationToken);
-    }
-
-    string? extractedText = null;
-    string? extractionError = null;
-    TextExtractionQuality? textExtractionQuality = null;
-    string? extractionSummary = null;
-
-    if (string.Equals(file.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
-    {
-        try
-        {
-            extractedText = await pdfTextExtractor.ExtractTextAsync(temporaryFilePath, cancellationToken);
-            textExtractionQuality = DocumentTextQualityEvaluator.Evaluate(documentType, extractedText);
-
-            if (DocumentTextQualityEvaluator.ShouldAttemptOcr(documentType, extractedText))
-            {
-                var ocrResult = await pdfOcrTextExtractor.ExtractTextAsync(temporaryFilePath, documentType, cancellationToken);
-
-                if (!string.IsNullOrWhiteSpace(ocrResult.Text))
-                {
-                    extractedText = ocrResult.Text;
-                    textExtractionQuality = ocrResult.Quality;
-                }
-
-                extractionSummary = ocrResult.Warning;
-            }
-        }
-        catch
-        {
-            extractionError = "No se pudo extraer texto del PDF. La carga se guardo correctamente; podes pegar texto manualmente para analizarlo.";
-        }
-    }
+    string? temporaryFilePath = null;
+    string? storagePath = null;
+    var fileStored = false;
+    var fileName = string.Empty;
+    var contentType = string.Empty;
+    long fileLength = 0;
 
     try
     {
+        if (!request.HasFormContentType)
+        {
+            return Results.BadRequest(new
+            {
+                error = "The request must be multipart/form-data."
+            });
+        }
+
+        var form = await request.ReadFormAsync(cancellationToken);
+        var documentTypeValue = form["documentType"].ToString();
+        var file = form.Files.GetFile("file");
+
+        if (!Enum.TryParse<DocumentType>(documentTypeValue, ignoreCase: true, out var documentType))
+        {
+            return Results.BadRequest(new
+            {
+                error = "A valid documentType is required."
+            });
+        }
+
+        if (file is null || file.Length == 0)
+        {
+            return Results.BadRequest(new
+            {
+                error = "A PDF file is required."
+            });
+        }
+
+        fileName = Path.GetFileName(file.FileName);
+        contentType = file.ContentType;
+        fileLength = file.Length;
+
+        if (!Program.IsAllowedPdfContentType(file.ContentType))
+        {
+            return Results.BadRequest(new
+            {
+                error = "Only PDF documents are allowed."
+            });
+        }
+
+        var maxPdfSizeBytes = Program.GetMaxPdfSizeBytes(storageOptions.Value);
+        if (file.Length > maxPdfSizeBytes)
+        {
+            return Results.BadRequest(new
+            {
+                error = $"The PDF document must be {Program.FormatMegabytes(maxPdfSizeBytes)} MB or smaller."
+            });
+        }
+
+        var documentId = Guid.NewGuid();
+        storagePath = fileStorage.CreateStoragePath(
+            Program.BuildAnalysisStoragePrefix(id),
+            "documents",
+            documentId.ToString("D"),
+            "original.pdf");
+        temporaryFilePath = Program.CreateTemporaryFilePath(".pdf");
+
+        await using (var stream = File.Create(temporaryFilePath))
+        {
+            await file.CopyToAsync(stream, cancellationToken);
+        }
+
+        await using (var stream = File.OpenRead(temporaryFilePath))
+        {
+            await fileStorage.SaveAsync(storagePath, stream, file.ContentType, cancellationToken);
+            fileStored = true;
+        }
+
+        string? extractedText = null;
+        string? extractionError = null;
+        TextExtractionQuality? textExtractionQuality = null;
+        string? extractionSummary = null;
+
+        if (string.Equals(file.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                extractedText = await pdfTextExtractor.ExtractTextAsync(temporaryFilePath, cancellationToken);
+                textExtractionQuality = DocumentTextQualityEvaluator.Evaluate(documentType, extractedText);
+
+                if (DocumentTextQualityEvaluator.ShouldAttemptOcr(documentType, extractedText))
+                {
+                    var ocrResult = await pdfOcrTextExtractor.ExtractTextAsync(temporaryFilePath, documentType, cancellationToken);
+
+                    if (!string.IsNullOrWhiteSpace(ocrResult.Text))
+                    {
+                        extractedText = ocrResult.Text;
+                        textExtractionQuality = ocrResult.Quality;
+                    }
+
+                    extractionSummary = ocrResult.Warning;
+                }
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(
+                    exception,
+                    "PDF extraction failed during document upload. AnalysisId={AnalysisId} StoragePath={StoragePath} FileName={FileName} ContentType={ContentType} SizeBytes={SizeBytes} Exception={Exception}",
+                    id,
+                    storagePath,
+                    fileName,
+                    contentType,
+                    fileLength,
+                    exception.ToString());
+
+                extractionError = "No se pudo extraer texto del PDF. La carga se guardo correctamente; podes pegar texto manualmente para analizarlo.";
+            }
+        }
+
         var result = await sender.Send(new AddPropertyDocumentCommand(
             id,
             documentId,
             documentType,
-            Path.GetFileName(file.FileName),
+            fileName,
             file.ContentType,
             file.Length,
             storagePath,
@@ -1320,7 +1343,11 @@ propertyAnalyses.MapPost("/{id:guid}/documents", async (
 
         if (result is null)
         {
-            await fileStorage.DeleteAsync(storagePath, cancellationToken);
+            if (fileStored)
+            {
+                await fileStorage.DeleteAsync(storagePath, cancellationToken);
+            }
+
             return Results.NotFound();
         }
 
@@ -1328,16 +1355,46 @@ propertyAnalyses.MapPost("/{id:guid}/documents", async (
     }
     catch (ArgumentException exception)
     {
-        await fileStorage.DeleteAsync(storagePath, cancellationToken);
+        if (fileStored && storagePath is not null)
+        {
+            await Program.TryDeleteStoredFileAsync(fileStorage, storagePath, logger, cancellationToken);
+        }
+
         return Results.BadRequest(new
         {
             error = exception.Message
         });
     }
-    catch
+    catch (Exception exception)
     {
-        await fileStorage.DeleteAsync(storagePath, cancellationToken);
-        throw;
+        if (fileStored && storagePath is not null)
+        {
+            await Program.TryDeleteStoredFileAsync(fileStorage, storagePath, logger, cancellationToken);
+        }
+
+        logger.LogError(
+            exception,
+            "Document upload failed. AnalysisId={AnalysisId} StorageProvider={StorageProvider} AzureBlobConnectionStringConfigured={AzureBlobConnectionStringConfigured} AzureBlobContainerName={AzureBlobContainerName} StoragePath={StoragePath} FileName={FileName} ContentType={ContentType} SizeBytes={SizeBytes} TemporaryFilePath={TemporaryFilePath} Exception={Exception}",
+            id,
+            storageOptions.Value.Provider,
+            !string.IsNullOrWhiteSpace(storageOptions.Value.AzureBlob.ConnectionString) &&
+                !Program.IsPlaceholderSecret(storageOptions.Value.AzureBlob.ConnectionString),
+            storageOptions.Value.AzureBlob.ContainerName,
+            storagePath,
+            fileName,
+            contentType,
+            fileLength,
+            temporaryFilePath,
+            exception.ToString());
+
+        return Results.Problem(
+            title: "No se pudo cargar el documento.",
+            detail: "La carga fallo en el backend. Revisa los logs de App Service con el traceId para ver la excepcion real.",
+            statusCode: StatusCodes.Status500InternalServerError,
+            extensions: new Dictionary<string, object?>
+            {
+                ["traceId"] = request.HttpContext.TraceIdentifier
+            });
     }
     finally
     {
@@ -1970,6 +2027,26 @@ public partial class Program
         catch
         {
             // Temporary file cleanup is best-effort.
+        }
+    }
+
+    internal static async Task TryDeleteStoredFileAsync(
+        IPropertyFileStorage fileStorage,
+        string storagePath,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await fileStorage.DeleteAsync(storagePath, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Could not clean up stored file after document upload failure. StoragePath={StoragePath} Exception={Exception}",
+                storagePath,
+                exception.ToString());
         }
     }
 
