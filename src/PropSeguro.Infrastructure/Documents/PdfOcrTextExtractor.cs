@@ -1,346 +1,222 @@
-using System.Diagnostics;
+using System.Globalization;
 using System.Text;
+using Azure;
+using Azure.AI.DocumentIntelligence;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PropSeguro.Application.Common;
 using PropSeguro.Domain.PropertyAnalyses;
-using Tesseract;
 
 namespace PropSeguro.Infrastructure.Documents;
 
-public sealed class PdfOcrTextExtractor(IOptions<PdfOcrOptions> options) : IPdfOcrTextExtractor
+public sealed class PdfOcrTextExtractor(
+    IOptions<DocumentIntelligenceOptions> options,
+    ILogger<PdfOcrTextExtractor> logger) : IPdfOcrTextExtractor
 {
+    private static readonly string[] AuditPageTerms =
+    [
+        "historial del documento",
+        "signnow",
+        "registro de auditoria"
+    ];
+
     public async Task<PdfOcrResult> ExtractTextAsync(
         string filePath,
         DocumentType documentType,
         CancellationToken cancellationToken = default)
     {
-        var pdfToPpmPath = ResolvePdfToPpmPath(options.Value.PdfToPpmPath);
+        var configurationError = ValidateOptions(options.Value);
 
-        if (pdfToPpmPath is null)
+        if (configurationError is not null)
         {
+            logger.LogWarning(
+                "Azure Document Intelligence OCR is not configured. FilePath={FilePath} Error={Error}",
+                filePath,
+                configurationError);
+
             return new PdfOcrResult(
                 string.Empty,
                 TextExtractionQuality.Empty,
                 OcrAttempted: false,
-                "No se pudo ejecutar OCR porque no se encontró pdftoppm para renderizar el PDF.");
+                configurationError);
         }
-
-        var tessDataPath = ResolveTessDataPath(options.Value.TessDataPath, options.Value.Language);
-
-        if (tessDataPath is null)
-        {
-            return new PdfOcrResult(
-                string.Empty,
-                TextExtractionQuality.Empty,
-                OcrAttempted: false,
-                "No se pudo ejecutar OCR porque no se encontró la carpeta tessdata con idiomas de Tesseract. Configurá PdfOcr:TessDataPath o agregá eng.traineddata/spa.traineddata.");
-        }
-
-        var tempDirectory = Path.Combine(Path.GetTempPath(), "propsegura-ocr", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(tempDirectory);
 
         try
         {
-            var imagePrefix = Path.Combine(tempDirectory, "page");
-            var renderExitCode = await RunProcessAsync(
-                pdfToPpmPath,
-                $"-png -r {Math.Clamp(options.Value.Dpi, 120, 300)} -f 1 -l {Math.Clamp(options.Value.MaxPages, 1, 20)} \"{filePath}\" \"{imagePrefix}\"",
+            var model = string.IsNullOrWhiteSpace(options.Value.Model)
+                ? "prebuilt-read"
+                : options.Value.Model.Trim();
+            var client = new DocumentIntelligenceClient(
+                new Uri(options.Value.Endpoint!.Trim()),
+                new AzureKeyCredential(options.Value.ApiKey!.Trim()));
+            var documentBytes = await File.ReadAllBytesAsync(filePath, cancellationToken);
+            var operation = await client.AnalyzeDocumentAsync(
+                WaitUntil.Completed,
+                model,
+                BinaryData.FromBytes(documentBytes),
                 cancellationToken);
-
-            if (renderExitCode != 0)
-            {
-                return new PdfOcrResult(
-                    string.Empty,
-                    TextExtractionQuality.Empty,
-                    OcrAttempted: true,
-                    "No se pudo renderizar el PDF para OCR.");
-            }
-
-            var imageFiles = Directory.GetFiles(tempDirectory, "page-*.png")
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            var result = operation.Value;
+            var pages = result.Pages
+                .Select(page => new ExtractedPage(page.PageNumber, ExtractPageText(page, result.Content)))
                 .ToArray();
-
-            if (imageFiles.Length == 0)
-            {
-                return new PdfOcrResult(
-                    string.Empty,
-                    TextExtractionQuality.Empty,
-                    OcrAttempted: true,
-                    "No se generaron imágenes para OCR.");
-            }
-
-            var pageTexts = new List<string>();
-            using var engine = CreateEngine(tessDataPath, options.Value.Language);
-
-            foreach (var imageFile in imageFiles)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                using var image = Pix.LoadFromFile(imageFile);
-                using var page = engine.Process(image);
-                var pageText = page.GetText()?.Trim();
-
-                if (!string.IsNullOrWhiteSpace(pageText))
-                {
-                    pageTexts.Add(pageText);
-                }
-            }
-
-            var usefulPages = pageTexts
-                .Where(text => !DocumentTextQualityEvaluator.IsLikelyAuditPage(documentType, text))
+            var ignoredPages = pages
+                .Where(page => IsAuditPage(documentType, page.Text))
+                .Select(page => page.PageNumber)
                 .ToArray();
-            var selectedPages = usefulPages.Length > 0 ? usefulPages : pageTexts.ToArray();
-            var combinedText = JoinPages(selectedPages);
+            var usefulPages = pages
+                .Where(page => !string.IsNullOrWhiteSpace(page.Text))
+                .Where(page => !ignoredPages.Contains(page.PageNumber))
+                .ToArray();
+            var combinedText = JoinPages(usefulPages.Select(page => page.Text));
             var quality = DocumentTextQualityEvaluator.Evaluate(documentType, combinedText);
+
+            logger.LogInformation(
+                "Azure Document Intelligence OCR completed. Model={Model} PageCount={PageCount} IgnoredPages={IgnoredPages} ExtractedCharacters={ExtractedCharacters}",
+                model,
+                pages.Length,
+                ignoredPages.Length == 0 ? "(none)" : string.Join(",", ignoredPages),
+                combinedText.Length);
 
             return new PdfOcrResult(
                 combinedText,
                 quality,
                 OcrAttempted: true,
                 string.IsNullOrWhiteSpace(combinedText)
-                    ? "El PDF parece escaneado, pero OCR no pudo obtener texto útil. Revisá y pegá el texto manualmente antes de analizar."
-                    : "El PDF parece escaneado. PropSegura intentó leerlo con OCR. Revisá el texto antes de analizar.");
+                    ? "Azure Document Intelligence no pudo obtener texto util del documento. Revisalo y pega el texto manualmente antes de analizar."
+                    : $"Texto extraido con Azure Document Intelligence ({model}). Paginas: {pages.Length}. Paginas ignoradas: {ignoredPages.Length}.");
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (RequestFailedException exception)
         {
+            logger.LogError(
+                exception,
+                "Azure Document Intelligence OCR failed. FilePath={FilePath} Model={Model} Status={Status} ErrorCode={ErrorCode} Exception={Exception}",
+                filePath,
+                options.Value.Model,
+                exception.Status,
+                exception.ErrorCode,
+                exception.ToString());
+
             return new PdfOcrResult(
                 string.Empty,
                 TextExtractionQuality.Empty,
                 OcrAttempted: true,
-                "No se pudo ejecutar OCR sobre el PDF. Revisá y pegá el texto manualmente antes de analizar.");
+                $"Azure Document Intelligence no pudo procesar el documento. Status={exception.Status}, Code={exception.ErrorCode}.");
         }
-        finally
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            try
-            {
-                Directory.Delete(tempDirectory, recursive: true);
-            }
-            catch
-            {
-                // Temporary OCR files are best-effort cleanup.
-            }
+            logger.LogError(
+                exception,
+                "Azure Document Intelligence OCR failed. FilePath={FilePath} Model={Model} Exception={Exception}",
+                filePath,
+                options.Value.Model,
+                exception.ToString());
+
+            return new PdfOcrResult(
+                string.Empty,
+                TextExtractionQuality.Empty,
+                OcrAttempted: true,
+                "Azure Document Intelligence no pudo procesar el documento. Revisa la configuracion y los logs de App Service.");
         }
     }
 
-    private static TesseractEngine CreateEngine(string tessDataPath, string configuredLanguage)
+    private static string? ValidateOptions(DocumentIntelligenceOptions options)
     {
-        var languages = string.IsNullOrWhiteSpace(configuredLanguage)
-            ? ["spa+eng", "spa", "eng"]
-            : new[] { configuredLanguage, "spa+eng", "spa", "eng" }.Distinct().ToArray();
-
-        Exception? lastException = null;
-
-        foreach (var language in languages)
+        if (string.IsNullOrWhiteSpace(options.Endpoint))
         {
-            try
-            {
-                return new TesseractEngine(tessDataPath, language, EngineMode.Default);
-            }
-            catch (Exception exception)
-            {
-                lastException = exception;
-            }
+            return "Falta configurar DocumentIntelligence:Endpoint.";
         }
 
-        throw new InvalidOperationException("No se pudo inicializar Tesseract con los idiomas configurados.", lastException);
-    }
-
-    private static async Task<int> RunProcessAsync(string fileName, string arguments, CancellationToken cancellationToken)
-    {
-        using var process = new Process
+        if (!Uri.TryCreate(options.Endpoint.Trim(), UriKind.Absolute, out _))
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = fileName,
-                Arguments = arguments,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardError = true,
-                RedirectStandardOutput = true
-            }
-        };
-
-        process.Start();
-        await process.WaitForExitAsync(cancellationToken);
-
-        return process.ExitCode;
-    }
-
-    private static string JoinPages(IEnumerable<string> pages)
-    {
-        var builder = new StringBuilder();
-        var pageNumber = 1;
-
-        foreach (var page in pages)
-        {
-            if (builder.Length > 0)
-            {
-                builder.AppendLine();
-                builder.AppendLine();
-            }
-
-            builder.AppendLine($"--- Página {pageNumber} ---");
-            builder.AppendLine(page);
-            pageNumber++;
+            return "DocumentIntelligence:Endpoint no es una URL valida.";
         }
 
-        return builder.ToString().Trim();
-    }
-
-    private static string? ResolvePdfToPpmPath(string? configuredPath)
-    {
-        if (!string.IsNullOrWhiteSpace(configuredPath) && File.Exists(configuredPath))
+        if (string.IsNullOrWhiteSpace(options.ApiKey))
         {
-            return configuredPath;
+            return "Falta configurar DocumentIntelligence:ApiKey.";
         }
 
-        var pathMatch = FindExecutableOnPath("pdftoppm.exe") ?? FindExecutableOnPath("pdftoppm");
-
-        if (pathMatch is not null)
+        if (string.IsNullOrWhiteSpace(options.Model))
         {
-            return pathMatch;
-        }
-
-        var knownWindowsPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            "MiKTeX",
-            "miktex",
-            "bin",
-            "x64",
-            "pdftoppm.exe");
-
-        return File.Exists(knownWindowsPath) ? knownWindowsPath : null;
-    }
-
-    private static string? ResolveTessDataPath(string? configuredPath, string configuredLanguage)
-    {
-        foreach (var candidatePath in GetTessDataPathCandidates(configuredPath))
-        {
-            if (HasAnyRequestedLanguageData(candidatePath, configuredLanguage))
-            {
-                return candidatePath;
-            }
+            return "Falta configurar DocumentIntelligence:Model. Usa prebuilt-read o prebuilt-layout.";
         }
 
         return null;
     }
 
-    private static IEnumerable<string> GetTessDataPathCandidates(string? configuredPath)
+    private static string ExtractPageText(DocumentPage page, string? documentContent)
     {
-        if (!string.IsNullOrWhiteSpace(configuredPath))
+        var lineText = JoinPages(page.Lines
+            .Select(line => line.Content)
+            .Where(text => !string.IsNullOrWhiteSpace(text)));
+
+        if (!string.IsNullOrWhiteSpace(lineText))
         {
-            foreach (var path in ExpandTessDataCandidate(configuredPath))
+            return lineText;
+        }
+
+        if (string.IsNullOrWhiteSpace(documentContent))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder();
+
+        foreach (var span in page.Spans)
+        {
+            if (span.Offset < 0 || span.Length <= 0 || span.Offset >= documentContent.Length)
             {
-                yield return path;
+                continue;
             }
 
-            if (!Path.IsPathRooted(configuredPath))
-            {
-                foreach (var path in ExpandTessDataCandidate(Path.Combine(AppContext.BaseDirectory, configuredPath)))
-                {
-                    yield return path;
-                }
+            var length = Math.Min(span.Length, documentContent.Length - span.Offset);
+            builder.AppendLine(documentContent.Substring(span.Offset, length).Trim());
+        }
 
-                foreach (var path in ExpandTessDataCandidate(Path.GetFullPath(configuredPath)))
-                {
-                    yield return path;
-                }
+        return builder.ToString().Trim();
+    }
+
+    private static bool IsAuditPage(DocumentType documentType, string text)
+    {
+        var normalizedText = Normalize(text);
+
+        if (AuditPageTerms.Any(term => normalizedText.Contains(Normalize(term), StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        return DocumentTextQualityEvaluator.IsLikelyAuditPage(documentType, text);
+    }
+
+    private static string JoinPages(IEnumerable<string> pages)
+    {
+        return string.Join(
+            "\n\n",
+            pages
+                .Select(page => page.Trim())
+                .Where(page => !string.IsNullOrWhiteSpace(page)));
+    }
+
+    private static string Normalize(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(normalized.Length);
+
+        foreach (var character in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
+            {
+                builder.Append(character);
             }
         }
 
-        foreach (var path in ExpandTessDataCandidate(Path.Combine(AppContext.BaseDirectory, "tessdata")))
-        {
-            yield return path;
-        }
-
-        foreach (var path in FindTessDataDirectoriesUpwards(Directory.GetCurrentDirectory()))
-        {
-            yield return path;
-        }
-
-        var environmentPath = Environment.GetEnvironmentVariable("TESSDATA_PREFIX");
-
-        if (!string.IsNullOrWhiteSpace(environmentPath))
-        {
-            foreach (var path in ExpandTessDataCandidate(environmentPath))
-            {
-                yield return path;
-            }
-        }
-
-        foreach (var path in ExpandTessDataCandidate(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            "Tesseract-OCR",
-            "tessdata")))
-        {
-            yield return path;
-        }
-
-        foreach (var path in ExpandTessDataCandidate(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-            "Tesseract-OCR",
-            "tessdata")))
-        {
-            yield return path;
-        }
+        return builder.ToString().Normalize(NormalizationForm.FormC);
     }
 
-    private static IEnumerable<string> ExpandTessDataCandidate(string path)
-    {
-        if (Directory.Exists(path))
-        {
-            yield return path;
-        }
-
-        var childTessDataPath = Path.Combine(path, "tessdata");
-
-        if (Directory.Exists(childTessDataPath))
-        {
-            yield return childTessDataPath;
-        }
-    }
-
-    private static IEnumerable<string> FindTessDataDirectoriesUpwards(string startPath)
-    {
-        var directory = new DirectoryInfo(startPath);
-
-        while (directory is not null)
-        {
-            var tessDataPath = Path.Combine(directory.FullName, "tessdata");
-
-            if (Directory.Exists(tessDataPath))
-            {
-                yield return tessDataPath;
-            }
-
-            directory = directory.Parent;
-        }
-    }
-
-    private static bool HasAnyRequestedLanguageData(string path, string configuredLanguage)
-    {
-        if (!Directory.Exists(path))
-        {
-            return false;
-        }
-
-        var languages = string.IsNullOrWhiteSpace(configuredLanguage)
-            ? ["spa", "eng"]
-            : configuredLanguage
-                .Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Concat(["spa", "eng"])
-                .Distinct(StringComparer.OrdinalIgnoreCase);
-
-        return languages.Any(language => File.Exists(Path.Combine(path, $"{language}.traineddata")));
-    }
-
-    private static string? FindExecutableOnPath(string executableName)
-    {
-        var paths = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-        return paths
-            .Select(path => Path.Combine(path, executableName))
-            .FirstOrDefault(File.Exists);
-    }
+    private sealed record ExtractedPage(int PageNumber, string Text);
 }

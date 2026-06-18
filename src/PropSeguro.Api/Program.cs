@@ -1251,11 +1251,11 @@ propertyAnalyses.MapPost("/{id:guid}/documents", async (
         contentType = file.ContentType;
         fileLength = file.Length;
 
-        if (!Program.IsAllowedPdfContentType(file.ContentType))
+        if (!Program.IsAllowedDocumentUploadContentType(file.ContentType))
         {
             return Results.BadRequest(new
             {
-                error = "Only PDF documents are allowed."
+                error = "Only PDF, JPEG or PNG documents are allowed."
             });
         }
 
@@ -1273,8 +1273,8 @@ propertyAnalyses.MapPost("/{id:guid}/documents", async (
             Program.BuildAnalysisStoragePrefix(id),
             "documents",
             documentId.ToString("D"),
-            "original.pdf");
-        temporaryFilePath = Program.CreateTemporaryFilePath(".pdf");
+            $"original{Program.GetDocumentUploadExtension(file.ContentType, file.FileName)}");
+        temporaryFilePath = Program.CreateTemporaryFilePath(Program.GetDocumentUploadExtension(file.ContentType, file.FileName));
 
         await using (var stream = File.Create(temporaryFilePath))
         {
@@ -1307,9 +1307,18 @@ propertyAnalyses.MapPost("/{id:guid}/documents", async (
                     {
                         extractedText = ocrResult.Text;
                         textExtractionQuality = ocrResult.Quality;
+                        extractionError = null;
                     }
 
-                    extractionSummary = ocrResult.Warning;
+                    if (string.IsNullOrWhiteSpace(ocrResult.Text) &&
+                        textExtractionQuality is TextExtractionQuality.Empty or TextExtractionQuality.Poor)
+                    {
+                        extractionError = ocrResult.Warning;
+                    }
+                    else
+                    {
+                        extractionSummary = ocrResult.Warning;
+                    }
                 }
             }
             catch (Exception exception)
@@ -1325,6 +1334,22 @@ propertyAnalyses.MapPost("/{id:guid}/documents", async (
                     exception.ToString());
 
                 extractionError = "No se pudo extraer texto del PDF. La carga se guardo correctamente; podes pegar texto manualmente para analizarlo.";
+            }
+        }
+        else if (Program.IsAllowedDocumentImageContentType(file.ContentType))
+        {
+            var ocrResult = await pdfOcrTextExtractor.ExtractTextAsync(temporaryFilePath, documentType, cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(ocrResult.Text))
+            {
+                extractedText = ocrResult.Text;
+                textExtractionQuality = ocrResult.Quality;
+                extractionSummary = ocrResult.Warning;
+            }
+            else
+            {
+                extractionError = ocrResult.Warning ?? "No se pudo extraer texto de la imagen. Revisa la configuracion OCR y pega el texto manualmente.";
+                textExtractionQuality = TextExtractionQuality.Empty;
             }
         }
 
@@ -2062,6 +2087,17 @@ public partial class Program
         return string.Equals(contentType, "application/pdf", StringComparison.OrdinalIgnoreCase);
     }
 
+    internal static bool IsAllowedDocumentImageContentType(string? contentType)
+    {
+        return string.Equals(contentType, "image/jpeg", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(contentType, "image/png", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsAllowedDocumentUploadContentType(string? contentType)
+    {
+        return IsAllowedPdfContentType(contentType) || IsAllowedDocumentImageContentType(contentType);
+    }
+
     internal static long GetMaxImageSizeBytes(StorageOptions options)
     {
         return options.MaxImageSizeBytes > 0 ? options.MaxImageSizeBytes : MaxCoverImageSizeBytes;
@@ -2110,6 +2146,39 @@ public partial class Program
             "image/png" => ".png",
             "image/webp" => ".webp",
             _ => ".img"
+        };
+    }
+
+    internal static string GetDocumentUploadExtension(string contentType, string? fileName)
+    {
+        var extension = Path.GetExtension(fileName);
+
+        if (!string.IsNullOrWhiteSpace(extension))
+        {
+            extension = extension.ToLowerInvariant();
+
+            if (contentType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase) && extension == ".pdf")
+            {
+                return extension;
+            }
+
+            if (contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) && extension is ".jpg" or ".jpeg")
+            {
+                return extension;
+            }
+
+            if (contentType.Equals("image/png", StringComparison.OrdinalIgnoreCase) && extension == ".png")
+            {
+                return extension;
+            }
+        }
+
+        return contentType.ToLowerInvariant() switch
+        {
+            "application/pdf" => ".pdf",
+            "image/jpeg" => ".jpg",
+            "image/png" => ".png",
+            _ => ".bin"
         };
     }
 
