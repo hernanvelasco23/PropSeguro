@@ -223,8 +223,6 @@ var enableRateLimiter = !builder.Environment.IsProduction() ||
     builder.Configuration.GetValue<bool>("Diagnostics:EnableRateLimiter");
 var enableAuth = !builder.Environment.IsProduction() ||
     builder.Configuration.GetValue<bool>("Diagnostics:EnableAuth");
-var enableSeedAdmin = !builder.Environment.IsProduction() ||
-    builder.Configuration.GetValue<bool>("Diagnostics:EnableSeedAdmin");
 
 var app = builder.Build();
 var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
@@ -243,6 +241,47 @@ startupLogger.LogInformation(
 
 app.UseRouting();
 app.UseCors("DefaultCorsPolicy");
+
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (Exception exception)
+    {
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var userEmail = context.User.FindFirstValue(ClaimTypes.Email);
+        var userRole = context.User.FindFirstValue(ClaimTypes.Role);
+
+        logger.LogError(
+            exception,
+            "Unhandled backend exception. TraceId={TraceId} Method={Method} Path={Path} Origin={Origin} UserId={UserId} UserEmail={UserEmail} UserRole={UserRole} ExceptionMessage={ExceptionMessage}",
+            context.TraceIdentifier,
+            context.Request.Method,
+            context.Request.Path,
+            context.Request.Headers.Origin.ToString(),
+            userId,
+            userEmail,
+            userRole,
+            exception.Message);
+
+        if (context.Response.HasStarted)
+        {
+            throw;
+        }
+
+        context.Response.Clear();
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            error = "Error interno del backend.",
+            message = "La operacion fallo en el servidor. Revisa los logs de App Service con el traceId para ver la causa exacta.",
+            traceId = context.TraceIdentifier
+        });
+    }
+});
 
 if (enableSwagger)
 {
@@ -266,9 +305,24 @@ if (enableAuth)
     app.UseAuthorization();
 }
 
-if (enableSeedAdmin && (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("SeedAdmin:Enabled")))
+var seedAdminEnabled = app.Configuration.GetValue<bool>("SeedAdmin:Enabled");
+var shouldRunSeedAdmin = app.Environment.IsDevelopment() || seedAdminEnabled;
+
+if (shouldRunSeedAdmin)
 {
-    await Program.SeedDevelopmentAdminAsync(app.Services, app.Configuration, app.Environment);
+    try
+    {
+        await Program.SeedDevelopmentAdminAsync(app.Services, app.Configuration, app.Environment);
+    }
+    catch (Exception exception)
+    {
+        startupLogger.LogError(
+            exception,
+            "SeedAdmin startup task failed. Environment={Environment} SeedAdminEnabled={SeedAdminEnabled} ExceptionMessage={ExceptionMessage}",
+            app.Environment.EnvironmentName,
+            seedAdminEnabled,
+            exception.Message);
+    }
 }
 
 app.MapGet("/health", () => Results.Text("OK"))
@@ -686,6 +740,7 @@ admin.MapPatch("/users/{id:guid}/enable", async (
 app.MapPost("/api/listing-imports", async (
     ListingImportRequest request,
     IListingImporter listingImporter,
+    ILogger<Program> logger,
     CancellationToken cancellationToken) =>
 {
     try
@@ -699,6 +754,22 @@ app.MapPost("/api/listing-imports", async (
         {
             error = exception.Message
         });
+    }
+    catch (Exception exception)
+    {
+        logger.LogError(
+            exception,
+            "Listing import failed for {ListingUrl}. ExceptionMessage: {ExceptionMessage}",
+            request.ListingUrl,
+            exception.Message);
+
+        return Results.Json(
+            new
+            {
+                error = "No se pudo importar la publicacion.",
+                message = "El sitio puede estar bloqueando la lectura automatica o devolviendo un formato inesperado. Carga los datos manualmente y volve a intentar mas tarde."
+            },
+            statusCode: StatusCodes.Status502BadGateway);
     }
 })
 .WithTags("Listing Imports")
