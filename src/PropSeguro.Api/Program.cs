@@ -1,4 +1,5 @@
 using MediatR;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.RateLimiting;
@@ -185,6 +186,51 @@ builder.Services
         };
         options.Events = new JwtBearerEvents
         {
+            OnAuthenticationFailed = context =>
+            {
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                logger.LogWarning(
+                    context.Exception,
+                    "JWT authentication failed. TraceId={TraceId} Method={Method} Path={Path} ExceptionMessage={ExceptionMessage}",
+                    context.HttpContext.TraceIdentifier,
+                    context.HttpContext.Request.Method,
+                    context.HttpContext.Request.Path,
+                    context.Exception.Message);
+
+                return Task.CompletedTask;
+            },
+            OnChallenge = async context =>
+            {
+                context.HandleResponse();
+
+                if (context.Response.HasStarted)
+                {
+                    return;
+                }
+
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    error = "No autorizado.",
+                    message = "La sesion no es valida o expiro. Volve a iniciar sesion.",
+                    traceId = context.HttpContext.TraceIdentifier
+                });
+            },
+            OnForbidden = async context =>
+            {
+                if (context.Response.HasStarted)
+                {
+                    return;
+                }
+
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    error = "Acceso denegado.",
+                    message = "Tu usuario no tiene permisos para realizar esta accion.",
+                    traceId = context.HttpContext.TraceIdentifier
+                });
+            },
             OnTokenValidated = async context =>
             {
                 var userIdValue = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -222,7 +268,7 @@ var enableSwagger = !builder.Environment.IsProduction() ||
 var enableRateLimiter = !builder.Environment.IsProduction() ||
     builder.Configuration.GetValue<bool>("Diagnostics:EnableRateLimiter");
 var enableAuth = !builder.Environment.IsProduction() ||
-    builder.Configuration.GetValue<bool>("Diagnostics:EnableAuth");
+    builder.Configuration.GetValue("Diagnostics:EnableAuth", true);
 
 var app = builder.Build();
 var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
@@ -238,6 +284,12 @@ if (minimalPipeline)
 startupLogger.LogInformation(
     "CORS DefaultCorsPolicy allowed origins: {AllowedOrigins}",
     effectiveAllowedOrigins.Length > 0 ? string.Join(", ", effectiveAllowedOrigins) : "(none)");
+
+if (!enableAuth)
+{
+    startupLogger.LogWarning(
+        "Authentication and authorization middleware are disabled. Authenticated endpoints may fail unless Diagnostics:EnableAuth is true.");
+}
 
 app.UseRouting();
 app.UseCors("DefaultCorsPolicy");
@@ -302,6 +354,31 @@ if (enableRateLimiter)
 if (enableAuth)
 {
     app.UseAuthentication();
+    app.Use(async (context, next) =>
+    {
+        var endpoint = context.GetEndpoint();
+        var requiresAuthorization = endpoint?.Metadata.GetMetadata<IAuthorizeData>() is not null;
+
+        if (requiresAuthorization)
+        {
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+            var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var userEmail = context.User.FindFirstValue(ClaimTypes.Email);
+            var roles = string.Join(",", context.User.FindAll(ClaimTypes.Role).Select(claim => claim.Value));
+
+            logger.LogInformation(
+                "Authorized endpoint request. TraceId={TraceId} Method={Method} Path={Path} IsAuthenticated={IsAuthenticated} UserId={UserId} UserEmail={UserEmail} Roles={Roles}",
+                context.TraceIdentifier,
+                context.Request.Method,
+                context.Request.Path,
+                context.User.Identity?.IsAuthenticated == true,
+                userId,
+                userEmail,
+                string.IsNullOrWhiteSpace(roles) ? "(none)" : roles);
+        }
+
+        await next();
+    });
     app.UseAuthorization();
 }
 
