@@ -158,6 +158,7 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
             analysis.EstimatedFairValueMaxUsd,
             analysis.SuggestedFirstOfferUsd,
             analysis.SuggestedTargetPriceUsd,
+            analysis.MaxRecommendedPriceUsd,
             analysis.NegotiationMarginPercent,
             analysis.MarketPosition.ToString(),
             MarketPositionLabel(analysis.MarketPosition),
@@ -218,6 +219,7 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
         PropertyAnalysis analysis,
         IReadOnlyCollection<DocumentFinding> findings)
     {
+        var expenseBenchmark = BuildExpenseBenchmark(analysis);
         var documents = analysis.Documents
             .Where(item => item.DocumentType == DocumentType.Expenses)
             .OrderByDescending(item => item.AnalyzedAtUtc ?? item.UploadedAtUtc)
@@ -226,7 +228,7 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
 
         if (document is null)
         {
-            return EmptyExpensesSection("Expensas no analizadas todavia.");
+            return EmptyExpensesSection("Expensas no analizadas todavia.", analysis, expenseBenchmark);
         }
 
         var documentFindings = findings
@@ -244,6 +246,11 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
             expenseIntelligence?.Classification,
             expenseValidation.ToDto(),
             expenseValidation.Extraction.DetectedExpenseAmount,
+            analysis.MonthlyExpenses,
+            analysis.TotalSquareMeters,
+            expenseBenchmark.MonthlyExpensesPerSquareMeter,
+            expenseBenchmark.BenchmarkMonthlyExpensesPerSquareMeter,
+            expenseBenchmark.Comparison,
             expenseValidation.Label,
             documentFindings.Take(6).Select(item => item.ToDto()).ToArray(),
             Unique(documentFindings.Select(item => item.SuggestedQuestion)).ToArray(),
@@ -449,6 +456,11 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
             items.Add("El precio publicado parece por encima del benchmark y puede requerir una negociación más firme.");
         }
 
+        if (expensesSection.ExpenseBenchmarkComparison == "Por debajo del benchmark de expensas")
+        {
+            items.Add("Las expensas publicadas estan por debajo del benchmark mensual por m2 de la zona; no aparecen como una alerta de costo con esta regla.");
+        }
+
         if (findings.Any(item => item.Title.Contains("extraordinarias", StringComparison.OrdinalIgnoreCase)))
         {
             items.Add("Antes de avanzar conviene confirmar si existen expensas extraordinarias pendientes.");
@@ -540,13 +552,14 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
                 null));
         }
 
-        if (analysis.MonthlyExpenses.HasValue && analysis.PriceUsd.HasValue && analysis.MonthlyExpenses.Value > analysis.PriceUsd.Value * 0.01m)
+        var expenseBenchmark = BuildExpenseBenchmark(analysis);
+        if (expenseBenchmark.Ratio > 1.35m)
         {
             risks.Add(new PropertyReportMoneyRiskDto(
-                "Expensas altas frente al precio",
-                "Un costo mensual alto puede afectar la rentabilidad o el presupuesto de vivienda.",
-                "La propiedad puede ser más cara de sostener de lo que parece por precio publicado.",
-                "Pedir detalle de expensas ordinarias, extraordinarias y deudas del consorcio.",
+                "Expensas altas frente al benchmark de la zona",
+                "Las expensas por m2 superan ampliamente el benchmark mensual de la zona.",
+                "La propiedad puede ser mas cara de sostener que alternativas comparables del mismo barrio.",
+                "Pedir detalle de expensas ordinarias, extraordinarias y deudas del consorcio antes de ofertar.",
                 "Expenses",
                 "Expensas"));
         }
@@ -817,10 +830,70 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
         return new PropertyReportDocumentTypeSectionDto(false, false, status, null, [], [], []);
     }
 
-    private static PropertyReportExpensesSectionDto EmptyExpensesSection(string status)
+    private static ExpenseBenchmarkAssessment BuildExpenseBenchmark(PropertyAnalysis analysis)
     {
-        return new PropertyReportExpensesSectionDto(false, false, status, null, null, null, null, null, [], [], []);
+        var benchmark = NeighborhoodBenchmark.Find(analysis.Neighborhood);
+        decimal? monthlyExpensesPerSquareMeter = null;
+        decimal? ratio = null;
+
+        if (analysis.MonthlyExpenses.HasValue &&
+            analysis.TotalSquareMeters.HasValue &&
+            analysis.TotalSquareMeters.Value > 0)
+        {
+            monthlyExpensesPerSquareMeter = analysis.MonthlyExpenses.Value / analysis.TotalSquareMeters.Value;
+        }
+
+        if (monthlyExpensesPerSquareMeter.HasValue &&
+            benchmark?.AverageMonthlyExpensesPerSquareMeterArs > 0)
+        {
+            ratio = monthlyExpensesPerSquareMeter.Value / benchmark.AverageMonthlyExpensesPerSquareMeterArs;
+        }
+
+        var comparison = ratio switch
+        {
+            null => "Sin benchmark de expensas",
+            <= 0.85m => "Por debajo del benchmark de expensas",
+            <= 1.10m => "En linea con el benchmark de expensas",
+            <= 1.35m => "Por encima del benchmark de expensas",
+            _ => "Muy por encima del benchmark de expensas"
+        };
+
+        return new ExpenseBenchmarkAssessment(
+            monthlyExpensesPerSquareMeter,
+            benchmark?.AverageMonthlyExpensesPerSquareMeterArs,
+            ratio,
+            comparison);
     }
+
+    private static PropertyReportExpensesSectionDto EmptyExpensesSection(
+        string status,
+        PropertyAnalysis analysis,
+        ExpenseBenchmarkAssessment expenseBenchmark)
+    {
+        return new PropertyReportExpensesSectionDto(
+            false,
+            false,
+            status,
+            null,
+            null,
+            null,
+            null,
+            analysis.MonthlyExpenses,
+            analysis.TotalSquareMeters,
+            expenseBenchmark.MonthlyExpensesPerSquareMeter,
+            expenseBenchmark.BenchmarkMonthlyExpensesPerSquareMeter,
+            expenseBenchmark.Comparison,
+            null,
+            [],
+            [],
+            []);
+    }
+
+    private sealed record ExpenseBenchmarkAssessment(
+        decimal? MonthlyExpensesPerSquareMeter,
+        decimal? BenchmarkMonthlyExpensesPerSquareMeter,
+        decimal? Ratio,
+        string Comparison);
 
     private static IEnumerable<string> Unique(IEnumerable<string?> values)
     {

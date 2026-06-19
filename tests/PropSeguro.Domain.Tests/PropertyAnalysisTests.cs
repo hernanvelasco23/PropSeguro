@@ -66,6 +66,7 @@ public sealed class PropertyAnalysisTests
         Assert.NotNull(analysis.SuggestedFirstOfferUsd);
         Assert.NotNull(analysis.SuggestedTargetPriceUsd);
         Assert.True(analysis.SuggestedFirstOfferUsd < analysis.SuggestedTargetPriceUsd);
+        AssertValidNegotiationRange(analysis);
         Assert.Contains("promedio estimado", analysis.NegotiationExplanation);
     }
 
@@ -80,6 +81,7 @@ public sealed class PropertyAnalysisTests
         Assert.True(analysis.NegotiationMarginPercent > 0);
         Assert.True(analysis.SuggestedFirstOfferUsd < analysis.SuggestedTargetPriceUsd);
         Assert.True(analysis.SuggestedTargetPriceUsd < analysis.PriceUsd);
+        AssertValidNegotiationRange(analysis);
     }
 
     [Fact]
@@ -94,6 +96,7 @@ public sealed class PropertyAnalysisTests
         Assert.True(analysis.SuggestedTargetPriceUsd <= analysis.PriceUsd);
         Assert.True(analysis.SuggestedFirstOfferUsd < analysis.SuggestedTargetPriceUsd);
         Assert.True(analysis.NegotiationMarginPercent >= 0);
+        Assert.True(analysis.SuggestedTargetPriceUsd <= analysis.EstimatedFairValueMaxUsd);
     }
 
     [Fact]
@@ -118,8 +121,26 @@ public sealed class PropertyAnalysisTests
 
         Assert.Equal(MarketPosition.Overpriced, analysis.MarketPosition);
         Assert.Equal(198000m, analysis.SuggestedTargetPriceUsd);
-        Assert.Equal(189200m, analysis.SuggestedFirstOfferUsd);
+        Assert.Equal(184700m, analysis.SuggestedFirstOfferUsd);
         Assert.Equal(10m, analysis.NegotiationMarginPercent);
+        AssertValidNegotiationRange(analysis);
+    }
+
+    [Fact]
+    public void Negotiation_caps_target_at_fair_value_high_when_published_price_is_far_above_fair_value()
+    {
+        var analysis = CreateAnalysis(priceUsd: 99000, neighborhood: "Caballito", totalSquareMeters: 30);
+
+        analysis.RunInitialAnalysis();
+
+        Assert.Equal(MarketPosition.Overpriced, analysis.MarketPosition);
+        Assert.Equal(70800m, analysis.EstimatedFairValueMinUsd);
+        Assert.Equal(78200m, analysis.EstimatedFairValueMaxUsd);
+        Assert.Equal(70800m, analysis.SuggestedFirstOfferUsd);
+        Assert.Equal(78200m, analysis.SuggestedTargetPriceUsd);
+        Assert.Equal(84400m, analysis.MaxRecommendedPriceUsd);
+        Assert.Contains("renegociacion fuerte", analysis.NegotiationExplanation);
+        AssertValidNegotiationRange(analysis);
     }
 
     [Fact]
@@ -223,5 +244,18 @@ public sealed class PropertyAnalysisTests
             true,
             PropertyCondition.Good,
             "Notas de prueba");
+    }
+
+    private static void AssertValidNegotiationRange(PropertyAnalysis analysis)
+    {
+        Assert.NotNull(analysis.EstimatedFairValueMaxUsd);
+        Assert.NotNull(analysis.SuggestedFirstOfferUsd);
+        Assert.NotNull(analysis.SuggestedTargetPriceUsd);
+        Assert.NotNull(analysis.MaxRecommendedPriceUsd);
+
+        Assert.True(analysis.SuggestedFirstOfferUsd <= analysis.SuggestedTargetPriceUsd);
+        Assert.True(analysis.SuggestedTargetPriceUsd <= analysis.EstimatedFairValueMaxUsd);
+        Assert.True(analysis.MaxRecommendedPriceUsd >= analysis.SuggestedTargetPriceUsd);
+        Assert.True(analysis.MaxRecommendedPriceUsd <= analysis.EstimatedFairValueMaxUsd * 1.08m);
     }
 }

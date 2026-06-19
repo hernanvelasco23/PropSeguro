@@ -102,6 +102,7 @@ public sealed class PropertyAnalysis
     public decimal? EstimatedFairValueMaxUsd { get; private set; }
     public decimal? SuggestedFirstOfferUsd { get; private set; }
     public decimal? SuggestedTargetPriceUsd { get; private set; }
+    public decimal? MaxRecommendedPriceUsd => CalculateMaxRecommendedPrice();
     public decimal? NegotiationMarginPercent { get; private set; }
     public string NegotiationExplanation { get; private set; }
     public string? CoverImageFileName { get; private set; }
@@ -301,7 +302,7 @@ public sealed class PropertyAnalysis
 
         var benchmark = NeighborhoodBenchmark.Find(Neighborhood);
         ApplyBenchmarkRules(benchmark, ref score);
-        ApplyExpensesRules(ref score);
+        ApplyExpensesRules(benchmark, ref score);
         ApplyPropertyQualityRules(ref score);
         ApplyLayoutRules(ref score);
         CalculateNegotiationRange(benchmark);
@@ -388,25 +389,32 @@ public sealed class PropertyAnalysis
         }
     }
 
-    private void ApplyExpensesRules(ref int score)
+    private void ApplyExpensesRules(NeighborhoodBenchmark? benchmark, ref int score)
     {
-        if (!MonthlyExpenses.HasValue || !PriceUsd.HasValue || PriceUsd.Value <= 0)
+        if (!MonthlyExpenses.HasValue)
         {
             score -= 8;
             return;
         }
 
-        var monthlyExpenseRatio = MonthlyExpenses.Value / PriceUsd.Value;
+        if (benchmark is null || !TotalSquareMeters.HasValue || TotalSquareMeters.Value <= 0)
+        {
+            score -= 4;
+            return;
+        }
 
-        if (monthlyExpenseRatio <= 0.004m)
+        var monthlyExpensesPerSquareMeter = MonthlyExpenses.Value / TotalSquareMeters.Value;
+        var ratio = monthlyExpensesPerSquareMeter / benchmark.AverageMonthlyExpensesPerSquareMeterArs;
+
+        if (ratio <= 0.85m)
         {
             score += 8;
         }
-        else if (monthlyExpenseRatio <= 0.007m)
+        else if (ratio <= 1.10m)
         {
             score += 2;
         }
-        else if (monthlyExpenseRatio <= 0.01m)
+        else if (ratio <= 1.35m)
         {
             score -= 8;
         }
@@ -507,8 +515,8 @@ public sealed class PropertyAnalysis
         EstimatedFairValueMinUsd = RoundMoney(fairValue * 0.95m);
         EstimatedFairValueMaxUsd = RoundMoney(fairValue * 1.05m);
 
-        var target = CalculateSuggestedTargetPrice();
-        var firstOffer = CalculateSuggestedFirstOffer(target);
+        var target = CalculateSuggestedTargetPrice(EstimatedFairValueMaxUsd.Value);
+        var firstOffer = CalculateSuggestedFirstOffer(target, EstimatedFairValueMinUsd.Value);
 
         SuggestedTargetPriceUsd = RoundMoney(target);
         SuggestedFirstOfferUsd = RoundMoney(firstOffer);
@@ -516,9 +524,9 @@ public sealed class PropertyAnalysis
         NegotiationExplanation = BuildNegotiationExplanation(benchmark, qualityAdjustment);
     }
 
-    private decimal CalculateSuggestedTargetPrice()
+    private decimal CalculateSuggestedTargetPrice(decimal fairValueHigh)
     {
-        return MarketPosition switch
+        var targetFromPublishedPrice = MarketPosition switch
         {
             MarketPosition.Cheap => PriceUsd!.Value * 0.985m,
             MarketPosition.Fair => PriceUsd!.Value * 0.97m,
@@ -526,11 +534,13 @@ public sealed class PropertyAnalysis
             MarketPosition.Overpriced => PriceUsd!.Value * 0.90m,
             _ => PriceUsd!.Value
         };
+
+        return Math.Min(targetFromPublishedPrice, fairValueHigh);
     }
 
-    private decimal CalculateSuggestedFirstOffer(decimal target)
+    private decimal CalculateSuggestedFirstOffer(decimal target, decimal fairValueLow)
     {
-        return MarketPosition switch
+        var firstOfferFromPublishedPrice = MarketPosition switch
         {
             MarketPosition.Cheap => PriceUsd!.Value * 0.97m,
             MarketPosition.Fair => PriceUsd!.Value * 0.95m,
@@ -538,6 +548,28 @@ public sealed class PropertyAnalysis
             MarketPosition.Overpriced => PriceUsd!.Value * 0.86m,
             _ => target * 0.97m
         };
+
+        return Math.Min(Math.Min(firstOfferFromPublishedPrice, fairValueLow), target);
+    }
+
+    private decimal? CalculateMaxRecommendedPrice()
+    {
+        if (!EstimatedFairValueMaxUsd.HasValue || !SuggestedTargetPriceUsd.HasValue)
+        {
+            return null;
+        }
+
+        var qualityAdjustment = CalculateFairValueAdjustment();
+        var premiumFactor = qualityAdjustment switch
+        {
+            >= 0.08m => 1.08m,
+            >= 0.03m => 1.05m,
+            > 0m => 1.03m,
+            _ => 1m
+        };
+        var maxRecommended = EstimatedFairValueMaxUsd.Value * premiumFactor;
+
+        return RoundMoneyDown(Math.Max(SuggestedTargetPriceUsd.Value, maxRecommended));
     }
 
     private decimal CalculateFairValueAdjustment()
@@ -610,12 +642,24 @@ public sealed class PropertyAnalysis
             return $"El valor publicado se encuentra aproximadamente un {absoluteDifferencePercent:N1}% {position} del promedio estimado para propiedades similares en {benchmark.Neighborhood} ({benchmark.AverageUsdPerSquareMeter:N0} USD/m2), por eso parece una oportunidad. {adjustmentText} El precio objetivo queda levemente por debajo del publicado para no poner en riesgo una oportunidad atractiva.";
         }
 
+        if (EstimatedFairValueMaxUsd.HasValue &&
+            PriceUsd.HasValue &&
+            PriceUsd.Value > EstimatedFairValueMaxUsd.Value * 1.20m)
+        {
+            return $"El valor publicado se encuentra aproximadamente un {absoluteDifferencePercent:N1}% {position} del promedio estimado para propiedades similares en {benchmark.Neighborhood} ({benchmark.AverageUsdPerSquareMeter:N0} USD/m2). {adjustmentText} El publicado supera en mas de 20% el techo del valor justo estimado, por eso la recomendacion es una renegociacion fuerte usando el rango por m2 como ancla principal.";
+        }
+
         return $"El valor publicado se encuentra aproximadamente un {absoluteDifferencePercent:N1}% {position} del promedio estimado para propiedades similares en {benchmark.Neighborhood} ({benchmark.AverageUsdPerSquareMeter:N0} USD/m2). {adjustmentText} Existe margen razonable de negociacion y la primera oferta queda por debajo del objetivo para dejar espacio de conversacion.";
     }
 
     private static decimal RoundMoney(decimal value)
     {
         return Math.Round(value / 100m, 0, MidpointRounding.AwayFromZero) * 100m;
+    }
+
+    private static decimal RoundMoneyDown(decimal value)
+    {
+        return Math.Floor(value / 100m) * 100m;
     }
 
     private RecommendedUse DetermineRecommendedUse(NeighborhoodBenchmark? benchmark)

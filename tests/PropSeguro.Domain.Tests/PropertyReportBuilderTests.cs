@@ -136,6 +136,43 @@ public sealed class PropertyReportBuilderTests
     }
 
     [Fact]
+    public async Task Report_does_not_flag_low_expenses_as_money_risk_when_below_neighborhood_benchmark()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId, priceUsd: 99000, monthlyExpenses: 30000);
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Equal(500m, report.ExpensesSection.MonthlyExpensesPerSquareMeter);
+        Assert.Equal(2800m, report.ExpensesSection.BenchmarkMonthlyExpensesPerSquareMeter);
+        Assert.Equal("Por debajo del benchmark de expensas", report.ExpensesSection.ExpenseBenchmarkComparison);
+        Assert.DoesNotContain(report.MoneyRisks, risk => risk.Title.Contains("Expensas altas", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(report.WhatThisMeansForYou, item => item.Contains("por debajo del benchmark mensual", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Report_flags_expenses_only_when_above_neighborhood_benchmark_per_square_meter()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId, priceUsd: 99000, monthlyExpenses: 240000);
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Equal(4000m, report.ExpensesSection.MonthlyExpensesPerSquareMeter);
+        Assert.Equal(2800m, report.ExpensesSection.BenchmarkMonthlyExpensesPerSquareMeter);
+        Assert.Equal("Muy por encima del benchmark de expensas", report.ExpensesSection.ExpenseBenchmarkComparison);
+        Assert.Contains(report.MoneyRisks, risk => risk.Title == "Expensas altas frente al benchmark de la zona");
+    }
+
+    [Fact]
     public async Task Report_aggregates_suggested_questions()
     {
         await using var dbContext = CreateDbContext();

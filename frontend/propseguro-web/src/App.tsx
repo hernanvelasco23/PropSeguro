@@ -30,6 +30,7 @@ import {
   getAnalysis,
   getPropertyReport,
   getStoredAuthUser,
+  getValidStoredAuthToken,
   importListing,
   listBetaAccessRequests,
   listAnalyses,
@@ -127,6 +128,14 @@ type ApprovalNotice = {
 
 type WorkspaceTab = 'general' | 'price' | 'documents' | 'findings' | 'report';
 
+type DocumentOperationStage = 'uploading' | 'extracting' | 'ready' | 'failed';
+
+type DocumentOperation = {
+  documentType: DocumentType;
+  stage: DocumentOperationStage;
+  message: string;
+};
+
 const emptyCreateForm: CreateFormState = {
   title: '',
   listingUrl: '',
@@ -155,8 +164,11 @@ export function App() {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => getStoredAuthUser());
   const [analysis, setAnalysis] = useState<PropertyAnalysis | null>(null);
   const [analyses, setAnalyses] = useState<PropertyAnalysisSummary[]>([]);
+  const [initializing, setInitializing] = useState(true);
+  const [pendingDetailTab, setPendingDetailTab] = useState<WorkspaceTab | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     function handlePopState() {
@@ -168,10 +180,28 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const token = getValidStoredAuthToken();
+
+    if (!token) {
+      setCurrentUser(null);
+
+      if (isProtectedPath(window.location.pathname)) {
+        window.sessionStorage.setItem('propsegura.returnTo', window.location.pathname);
+        navigate('/login');
+      }
+    }
+
+    setInitializing(false);
+  }, []);
+
+  useEffect(() => {
     function handleSessionExpired() {
       setCurrentUser(null);
       setAnalysis(null);
       setAnalyses([]);
+      if (isProtectedPath(window.location.pathname)) {
+        window.sessionStorage.setItem('propsegura.returnTo', window.location.pathname);
+      }
       setError('Tu sesión expiró. Volvé a ingresar para continuar.');
       navigate('/login');
     }
@@ -181,7 +211,12 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (initializing) {
+      return;
+    }
+
     if (isProtectedPath(path) && !currentUser) {
+      window.sessionStorage.setItem('propsegura.returnTo', path);
       navigate('/login');
       return;
     }
@@ -200,7 +235,7 @@ export function App() {
     if (id) {
       void loadAnalysis(id);
     }
-  }, [path, currentUser]);
+  }, [path, currentUser, initializing]);
 
   function navigate(to: string) {
     window.history.pushState(null, '', to);
@@ -263,6 +298,8 @@ export function App() {
 
   async function handleCreated(created: PropertyAnalysis) {
     setAnalysis(created);
+    setPendingDetailTab('documents');
+    setNotice('Propiedad guardada correctamente. Te llevamos a Documentos para continuar.');
     navigate(`/properties/${created.id}`);
     await refreshDashboard();
   }
@@ -300,7 +337,9 @@ export function App() {
 
   function handleLoginSuccess(user: AuthUser) {
     setCurrentUser(user);
-    navigate('/properties');
+    const returnTo = window.sessionStorage.getItem('propsegura.returnTo');
+    window.sessionStorage.removeItem('propsegura.returnTo');
+    navigate(returnTo && isProtectedPath(returnTo) ? returnTo : '/properties');
   }
 
   function handleLogout() {
@@ -312,6 +351,14 @@ export function App() {
   }
 
   const detailId = getPropertyIdFromPath(path);
+
+  if (initializing) {
+    return (
+      <main className="app-shell">
+        <InitialLoadingScreen />
+      </main>
+    );
+  }
 
   return (
     <main className="app-shell">
@@ -382,6 +429,15 @@ export function App() {
         </div>
       )}
 
+      {notice && (
+        <div className="banner-success" role="status" aria-live="polite">
+          <span>{notice}</span>
+          <button className="banner-close" type="button" onClick={() => setNotice(null)}>
+            Cerrar
+          </button>
+        </div>
+      )}
+
       {path === '/' && (
         <LandingPage
           onCreate={() => navigate('/properties/new')}
@@ -434,6 +490,8 @@ export function App() {
           onRefresh={() => refreshAnalysis()}
           onError={setError}
           setLoading={setLoading}
+          initialTab={pendingDetailTab}
+          onInitialTabConsumed={() => setPendingDetailTab(null)}
           onAnalysisUpdated={(updated) => {
             setAnalysis(updated);
             void refreshDashboard();
@@ -461,6 +519,16 @@ export function App() {
         </nav>
       </footer>
     </main>
+  );
+}
+
+function InitialLoadingScreen() {
+  return (
+    <section className="initial-loading-screen" role="status" aria-live="polite">
+      <span className="button-spinner" aria-hidden="true" />
+      <strong>Cargando PropSegura...</strong>
+      <p>Validando tu sesion y preparando tus propiedades.</p>
+    </section>
   );
 }
 
@@ -1674,6 +1742,7 @@ function CreateAnalysisForm({
   const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const expensesWarning = getExpensesPerSquareMeterWarning(form.monthlyExpenses, form.totalSquareMeters);
 
   async function handleImportListing() {
     const listingUrl = nullableText(form.listingUrl);
@@ -1843,6 +1912,7 @@ function CreateAnalysisForm({
                 </select>
               </label>
               <TextField label="Barrio" value={form.neighborhood} required placeholder="Ej: Recoleta" onChange={(neighborhood) => setForm({ ...form, neighborhood })} />
+              <p className="field-helper field-wide">Por ahora disponible para propiedades en CABA. Los valores de referencia son estimativos y sujetos a actualizacion.</p>
               <TextField label="Dirección" value={form.address} required placeholder="Ej: Av. Cabildo 1234" onChange={(address) => setForm({ ...form, address })} />
               <TextField label="Precio de publicación" type="number" value={form.priceUsd} placeholder="Ej: 85000" onChange={(priceUsd) => setForm({ ...form, priceUsd })} />
               <TextField label="Expensas mensuales" type="number" value={form.monthlyExpenses} placeholder="Ej: 100000" onChange={(monthlyExpenses) => setForm({ ...form, monthlyExpenses })} />
@@ -1856,6 +1926,11 @@ function CreateAnalysisForm({
               <TextField label="Departamento / Unidad" value={form.apartmentUnit} placeholder="Ej: B" onChange={(apartmentUnit) => setForm({ ...form, apartmentUnit })} />
               <TextField label="Identificador de unidad" value={form.unitIdentifier} placeholder="Ej: UF 12" onChange={(unitIdentifier) => setForm({ ...form, unitIdentifier })} />
               <p className="field-helper field-wide">Estos datos ayudan a validar que las expensas correspondan a la propiedad correcta.</p>
+              {expensesWarning && (
+                <div className="inline-warning field-wide" role="alert">
+                  {expensesWarning}
+                </div>
+              )}
               <SelectField label="Balcón" value={form.hasBalcony} onChange={(hasBalcony) => setForm({ ...form, hasBalcony })} />
               <SelectField label="Amenities" value={form.hasAmenities} onChange={(hasAmenities) => setForm({ ...form, hasAmenities })} />
               <SelectField label="Apto crédito" value={form.isCreditEligible} onChange={(isCreditEligible) => setForm({ ...form, isCreditEligible })} />
@@ -2193,6 +2268,8 @@ function AnalysisDetail({
   onRefresh,
   onError,
   setLoading,
+  initialTab,
+  onInitialTabConsumed,
   onAnalysisUpdated
 }: {
   analysis: PropertyAnalysis;
@@ -2200,6 +2277,8 @@ function AnalysisDetail({
   onRefresh: () => Promise<void>;
   onError: (message: string | null) => void;
   setLoading: (loading: boolean) => void;
+  initialTab?: WorkspaceTab | null;
+  onInitialTabConsumed?: () => void;
   onAnalysisUpdated: (analysis: PropertyAnalysis) => void;
 }) {
   const checklistStats = getChecklistStats(analysis.checklistItems);
@@ -2219,6 +2298,15 @@ function AnalysisDetail({
     setReport(null);
     setSelectedDocumentType(null);
   }, [analysis.id]);
+
+  useEffect(() => {
+    if (!initialTab) {
+      return;
+    }
+
+    setActiveTab(initialTab);
+    onInitialTabConsumed?.();
+  }, [initialTab, onInitialTabConsumed]);
 
   useEffect(() => {
     if (activeTab === 'report' && !report && !reportLoading) {
@@ -2393,9 +2481,11 @@ function AnalysisDetail({
             <Info label="Valor estimado" value={formatRange(analysis.negotiationAnalysis?.estimatedFairValueMinUsd, analysis.negotiationAnalysis?.estimatedFairValueMaxUsd)} />
             <Info label="Oferta inicial sugerida" value={formatMoney(analysis.negotiationAnalysis?.suggestedFirstOfferUsd ?? analysis.suggestedFirstOfferUsd)} />
             <Info label="Precio objetivo" value={formatMoney(analysis.negotiationAnalysis?.suggestedTargetPriceUsd ?? analysis.suggestedTargetPriceUsd)} />
+            <Info label="Maximo recomendado" value={formatMoney(analysis.negotiationAnalysis?.maxRecommendedPriceUsd ?? analysis.maxRecommendedPriceUsd)} />
             <Info label="Margen de negociación" value={formatPercent(analysis.negotiationAnalysis?.negotiationMarginPercent ?? analysis.negotiationMarginPercent)} />
           </div>
           <p className="score-summary">{analysis.negotiationAnalysis?.explanation ?? analysis.negotiationExplanation}</p>
+          <p className="reference-note">Valores de referencia estimativos para CABA, basados en tabla interna por barrio y sujetos a actualizacion.</p>
         </section>
 
         <BuildingHealthSection expenseIntelligence={analysis.expenseIntelligence} />
@@ -2607,6 +2697,7 @@ function PropertyReportPanel({
             <Info label="Precio publicado" value={formatMoney(report.negotiationSection.publishedPriceUsd)} />
             <Info label="Valor estimado" value={formatRange(report.negotiationSection.estimatedFairValueMinUsd, report.negotiationSection.estimatedFairValueMaxUsd)} />
             <Info label="Oferta inicial" value={formatMoney(report.negotiationSection.suggestedFirstOfferUsd)} />
+            <Info label="Maximo recomendado" value={formatMoney(report.negotiationSection.maxRecommendedPriceUsd)} />
             <Info label="Margen" value={formatPercent(report.negotiationSection.negotiationMarginPercent)} />
           </div>
         </ReportCard>
@@ -2680,8 +2771,26 @@ function ReportDocumentSection({
 }
 
 function ReportExpensesSection({ section }: { section: PropertyReport['expensesSection'] }) {
+  const expenseBenchmarkTone = section.expenseBenchmarkComparison?.startsWith('Por debajo')
+    ? 'success'
+    : section.expenseBenchmarkComparison?.startsWith('Muy por encima')
+      ? 'critical'
+      : section.expenseBenchmarkComparison?.startsWith('Por encima')
+        ? 'warning'
+        : 'info';
+
   return (
     <ReportCard title="Expensas">
+      <div className="summary-grid compact-report-grid expense-benchmark-grid">
+        <Info label="Expensas publicadas" value={formatMoney(section.publishedMonthlyExpenses)} />
+        <Info label="Metros usados" value={formatNumber(section.totalSquareMeters)} />
+        <Info label="Expensas ARS/m2" value={formatMoney(section.monthlyExpensesPerSquareMeter)} />
+        <Info label="Benchmark zona ARS/m2" value={formatMoney(section.benchmarkMonthlyExpensesPerSquareMeter)} />
+      </div>
+      <div className="expense-benchmark-note">
+        <Badge tone={expenseBenchmarkTone}>{section.expenseBenchmarkComparison}</Badge>
+        <p>Formula: expensas mensuales / m2 totales. No se compara ARS contra USD.</p>
+      </div>
       {!section.isAvailable || !section.isAnalyzed ? (
         <div className="empty-state compact-empty">
           <strong>Expensas no analizadas todavia.</strong>
@@ -3135,6 +3244,7 @@ function DocumentWorkspace({
 }) {
   const stats = getDocumentWorkspaceStats(analysis);
   const [showFutureDocuments, setShowFutureDocuments] = useState(false);
+  const [documentOperation, setDocumentOperation] = useState<DocumentOperation | null>(null);
   const selectedDocuments = selectedDocumentType
     ? getDocumentsByType(analysis.documents, selectedDocumentType)
     : [];
@@ -3159,6 +3269,10 @@ function DocumentWorkspace({
         <DocumentSummaryCard title="Pendientes" value={stats.pending} text="sin cargar todavía" />
         <DocumentSummaryCard title="Críticos" value={stats.criticalFindings} text="hallazgos documentales" tone={stats.criticalFindings > 0 ? 'critical' : 'success'} />
       </div>
+
+      {documentOperation && (
+        <DocumentOperationBanner operation={documentOperation} onDismiss={() => setDocumentOperation(null)} />
+      )}
 
       <div className="document-workspace-grid">
         <aside className="document-type-panel" aria-label="Tipos de documento">
@@ -3194,7 +3308,7 @@ function DocumentWorkspace({
 
         <div className="selected-document-panel">
           {!selectedDocumentType ? (
-            <DocumentStartState analysisId={analysis.id} onRefresh={onRefresh} onError={onError} setLoading={setLoading} />
+            <DocumentStartState analysisId={analysis.id} onRefresh={onRefresh} onError={onError} setLoading={setLoading} onOperation={setDocumentOperation} />
           ) : isFutureDocumentType(selectedDocumentType) ? (
             <FutureDocumentPlaceholder documentType={selectedDocumentType} />
           ) : (
@@ -3208,6 +3322,7 @@ function DocumentWorkspace({
               onRefresh={onRefresh}
               onError={onError}
               setLoading={setLoading}
+              onOperation={setDocumentOperation}
             />
           )}
           {/*
@@ -3233,6 +3348,31 @@ function DocumentWorkspace({
         </div>
       </div>
     </section>
+  );
+}
+
+function DocumentOperationBanner({
+  operation,
+  onDismiss
+}: {
+  operation: DocumentOperation;
+  onDismiss: () => void;
+}) {
+  const busy = operation.stage === 'uploading' || operation.stage === 'extracting';
+
+  return (
+    <div className={`document-operation-banner ${operation.stage}`} role={busy ? 'status' : 'alert'} aria-live="polite">
+      {busy && <span className="button-spinner" aria-hidden="true" />}
+      <div>
+        <strong>{cleanDocumentTypeLabel(operation.documentType)}</strong>
+        <p>{operation.message}</p>
+      </div>
+      {!busy && (
+        <button className="banner-close" type="button" onClick={onDismiss}>
+          Cerrar
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -3317,12 +3457,14 @@ function DocumentStartState({
   analysisId,
   onRefresh,
   onError,
-  setLoading
+  setLoading,
+  onOperation
 }: {
   analysisId: string;
   onRefresh: () => Promise<void>;
   onError: (message: string | null) => void;
   setLoading: (loading: boolean) => void;
+  onOperation: (operation: DocumentOperation | null) => void;
 }) {
   return (
     <div className="document-start-state">
@@ -3342,7 +3484,7 @@ function DocumentStartState({
           </div>
           <label className="primary-button file-action-button">
             Subir expensas
-            <AddDocumentInlineInput analysisId={analysisId} documentType="Expenses" onRefresh={onRefresh} onError={onError} setLoading={setLoading} />
+            <AddDocumentInlineInput analysisId={analysisId} documentType="Expenses" onRefresh={onRefresh} onError={onError} setLoading={setLoading} onOperation={onOperation} />
           </label>
         </article>
 
@@ -3354,7 +3496,7 @@ function DocumentStartState({
           </div>
           <label className="secondary-button file-action-button">
             Subir reserva
-            <AddDocumentInlineInput analysisId={analysisId} documentType="ReservationAgreement" onRefresh={onRefresh} onError={onError} setLoading={setLoading} />
+            <AddDocumentInlineInput analysisId={analysisId} documentType="ReservationAgreement" onRefresh={onRefresh} onError={onError} setLoading={setLoading} onOperation={onOperation} />
           </label>
         </article>
       </div>
@@ -3398,15 +3540,16 @@ function DocumentTypeItem({
   const latestDocument = documents[0] ?? null;
   const risk = documentRiskLevel(findings);
   const hasDocument = Boolean(latestDocument);
+  const uiState = getDocumentUiState(latestDocument);
 
   return (
     <button className={`document-type-item ${selected ? 'selected' : ''} ${future ? 'future' : ''}`} type="button" onClick={onClick}>
-      <span className={`document-type-state ${hasDocument ? 'uploaded' : 'empty'}`} aria-hidden="true">
-        {hasDocument ? '✓' : '○'}
+      <span className={`document-type-state ${future ? 'future' : uiState.state}`} aria-hidden="true">
+        {future ? '...' : uiState.icon}
       </span>
       <span className="document-type-main">
         <strong>{cleanDocumentTypeLabel(documentType)}</strong>
-        <small>{future ? 'Disponible en futuras versiones' : hasDocument ? documentAnalysisStatusLabel(latestDocument.analysisStatus) : 'No cargado'}</small>
+        <small>{future ? 'Disponible en futuras versiones' : uiState.label}</small>
       </span>
       {hasDocument && findings.length > 0 && (
         <Badge tone={findingTone(risk)}>{findingSeverityLabel(risk)}</Badge>
@@ -3424,7 +3567,8 @@ function SelectedDocumentWorkspace({
   expenseIntelligence,
   onRefresh,
   onError,
-  setLoading
+  setLoading,
+  onOperation
 }: {
   analysisId: string;
   documentType: DocumentType;
@@ -3435,6 +3579,7 @@ function SelectedDocumentWorkspace({
   onRefresh: () => Promise<void>;
   onError: (message: string | null) => void;
   setLoading: (loading: boolean) => void;
+  onOperation: (operation: DocumentOperation | null) => void;
 }) {
   const risk = documentRiskLevel(findings);
   const suggestedQuestions = uniqueStrings(findings.map((finding) => finding.suggestedQuestion));
@@ -3462,6 +3607,7 @@ function SelectedDocumentWorkspace({
               onRefresh={onRefresh}
               onError={onError}
               setLoading={setLoading}
+              onOperation={onOperation}
             />
           </label>
           <button className="ghost-button" type="button" disabled>Eliminar documento</button>
@@ -3479,6 +3625,7 @@ function SelectedDocumentWorkspace({
             onRefresh={onRefresh}
             onError={onError}
             setLoading={setLoading}
+            onOperation={onOperation}
           />
         </div>
       ) : (
@@ -3517,13 +3664,15 @@ function AddDocumentInlineInput({
   documentType,
   onRefresh,
   onError,
-  setLoading
+  setLoading,
+  onOperation
 }: {
   analysisId: string;
   documentType: DocumentType;
   onRefresh: () => Promise<void>;
   onError: (message: string | null) => void;
   setLoading: (loading: boolean) => void;
+  onOperation: (operation: DocumentOperation | null) => void;
 }) {
   const [uploading, setUploading] = useState(false);
 
@@ -3535,11 +3684,26 @@ function AddDocumentInlineInput({
     setUploading(true);
     setLoading(true);
     onError(null);
+    onOperation({
+      documentType,
+      stage: 'extracting',
+      message: 'Documento cargandose. Extrayendo texto/OCR, esto puede demorar unos segundos...'
+    });
 
     try {
       await addDocument(analysisId, { documentType, file });
       await onRefresh();
+      onOperation({
+        documentType,
+        stage: 'ready',
+        message: 'Documento cargado correctamente. Texto extraido o listo para revisar.'
+      });
     } catch (err) {
+      onOperation({
+        documentType,
+        stage: 'failed',
+        message: err instanceof Error ? err.message : 'No se pudo subir el documento.'
+      });
       onError(err instanceof Error ? err.message : 'No se pudo subir el documento.');
     } finally {
       setUploading(false);
@@ -3550,7 +3714,7 @@ function AddDocumentInlineInput({
   return (
     <input
       type="file"
-      accept="application/pdf,.pdf"
+      accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
       disabled={uploading}
       aria-busy={uploading ? 'true' : undefined}
       onChange={(event) => void handleFile(event.target.files?.[0] ?? null)}
@@ -3611,7 +3775,8 @@ function AddDocumentForm({
   lockDocumentType = false,
   onRefresh,
   onError,
-  setLoading
+  setLoading,
+  onOperation
 }: {
   analysisId: string;
   initialDocumentType?: DocumentType;
@@ -3619,6 +3784,7 @@ function AddDocumentForm({
   onRefresh: () => Promise<void>;
   onError: (message: string | null) => void;
   setLoading: (loading: boolean) => void;
+  onOperation: (operation: DocumentOperation | null) => void;
 }) {
   const [form, setForm] = useState<{ documentType: DocumentType; file: File | null }>({
     documentType: initialDocumentType ?? 'Expenses',
@@ -3644,14 +3810,30 @@ function AddDocumentForm({
         throw new Error('Seleccioná un PDF para subir.');
       }
 
+      onOperation({
+        documentType: form.documentType,
+        stage: 'extracting',
+        message: 'Documento cargandose. Extrayendo texto/OCR, esto puede demorar unos segundos...'
+      });
+
       await addDocument(analysisId, {
         documentType: form.documentType,
         file: form.file
+      });
+      onOperation({
+        documentType: form.documentType,
+        stage: 'ready',
+        message: 'Documento cargado correctamente. Texto extraido o listo para revisar.'
       });
       setForm({ documentType: initialDocumentType ?? 'Expenses', file: null });
       setFileInputKey((key) => key + 1);
       await onRefresh();
     } catch (err) {
+      onOperation({
+        documentType: form.documentType,
+        stage: 'failed',
+        message: err instanceof Error ? err.message : 'No se pudo agregar el documento.'
+      });
       onError(err instanceof Error ? err.message : 'No se pudo agregar el documento.');
     } finally {
       setSubmitting(false);
@@ -3672,11 +3854,11 @@ function AddDocumentForm({
         </select>
       </label>
       <label className="field">
-        <span>PDF</span>
+        <span>PDF, JPG o PNG</span>
         <input
           key={fileInputKey}
           type="file"
-          accept="application/pdf,.pdf"
+          accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
           required
           onChange={(event) => {
             const file = event.target.files?.[0] ?? null;
@@ -3691,7 +3873,7 @@ function AddDocumentForm({
         aria-busy={submitting ? 'true' : undefined}
       >
         {submitting && <span className="button-spinner" aria-hidden="true" />}
-        {submitting ? 'Cargando...' : 'Subir PDF'}
+        {submitting ? 'Cargando...' : 'Subir documento'}
       </button>
     </form>
   );
@@ -4242,11 +4424,52 @@ function documentAnalysisStatusLabel(status: string) {
   const labels: Record<string, string> = {
     NotStarted: 'Sin analizar',
     Pending: 'Pendiente',
+    Analyzed: 'Analizado',
     Completed: 'Analizado',
     Failed: 'Falló'
   };
 
   return labels[status] ?? status;
+}
+
+function getDocumentUiState(document: PropertyDocument | null) {
+  if (!document) {
+    return {
+      state: 'pending',
+      label: 'Pendiente',
+      icon: '...'
+    };
+  }
+
+  if (document.textExtractionStatus === 'Failed' || document.analysisStatus === 'Failed') {
+    return {
+      state: 'failed',
+      label: 'Fallo',
+      icon: '!'
+    };
+  }
+
+  if (document.analysisStatus === 'Completed' || document.analysisStatus === 'Analyzed') {
+    return {
+      state: 'analyzed',
+      label: 'Analizado',
+      icon: 'OK'
+    };
+  }
+
+  if (document.hasExtractedText || document.textExtractionStatus === 'Completed') {
+    return {
+      state: 'ready',
+      label: 'Listo para analizar',
+      icon: 'OK'
+    };
+  }
+
+  return {
+    state: 'uploaded',
+    label: 'Archivo cargado',
+    icon: 'OK'
+  };
 }
 
 function documentIntelligenceTitle(documentType: DocumentType) {
@@ -4984,6 +5207,31 @@ function getReportConsistencyNote(report: PropertyReport) {
 
 function formatMoney(value?: number | null) {
   return value == null ? 'Sin dato' : value.toLocaleString('es-AR');
+}
+
+function getExpensesPerSquareMeterWarning(monthlyExpensesValue?: string | number | null, totalSquareMetersValue?: string | number | null) {
+  const monthlyExpenses = typeof monthlyExpensesValue === 'number'
+    ? monthlyExpensesValue
+    : nullableNumber(monthlyExpensesValue ?? '');
+  const totalSquareMeters = typeof totalSquareMetersValue === 'number'
+    ? totalSquareMetersValue
+    : nullableNumber(totalSquareMetersValue ?? '');
+
+  if (!monthlyExpenses || !totalSquareMeters || totalSquareMeters <= 0) {
+    return null;
+  }
+
+  const expensesPerSquareMeter = monthlyExpenses / totalSquareMeters;
+
+  if (expensesPerSquareMeter >= 15000) {
+    return `Expensas muy altas para la superficie: ${expensesPerSquareMeter.toLocaleString('es-AR', { maximumFractionDigits: 0 })} ARS/m2. Revisar extraordinarias, deuda o gastos del consorcio.`;
+  }
+
+  if (expensesPerSquareMeter >= 8000) {
+    return `Expensas elevadas para la superficie: ${expensesPerSquareMeter.toLocaleString('es-AR', { maximumFractionDigits: 0 })} ARS/m2. Conviene validar el detalle de la liquidacion.`;
+  }
+
+  return null;
 }
 
 function formatRange(min?: number | null, max?: number | null) {

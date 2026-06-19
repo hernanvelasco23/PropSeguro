@@ -194,6 +194,7 @@ export type NegotiationAnalysis = {
   estimatedFairValueMaxUsd?: number | null;
   suggestedFirstOfferUsd?: number | null;
   suggestedTargetPriceUsd?: number | null;
+  maxRecommendedPriceUsd?: number | null;
   negotiationMarginPercent?: number | null;
   explanation: string;
 };
@@ -252,6 +253,7 @@ export type PropertyAnalysis = {
   estimatedFairValueMaxUsd?: number | null;
   suggestedFirstOfferUsd?: number | null;
   suggestedTargetPriceUsd?: number | null;
+  maxRecommendedPriceUsd?: number | null;
   negotiationMarginPercent?: number | null;
   negotiationExplanation: string;
   negotiationAnalysis: NegotiationAnalysis;
@@ -378,6 +380,7 @@ export type PropertyReportNegotiationSection = {
   estimatedFairValueMaxUsd?: number | null;
   suggestedFirstOfferUsd?: number | null;
   suggestedTargetPriceUsd?: number | null;
+  maxRecommendedPriceUsd?: number | null;
   negotiationMarginPercent?: number | null;
   marketPosition: string;
   marketPositionLabel: string;
@@ -406,6 +409,11 @@ export type PropertyReportExpensesSection = PropertyReportDocumentTypeSection & 
   buildingHealthClassification?: string | null;
   documentConfidence?: ExpenseDocumentValidation | null;
   detectedExpenseAmount?: number | null;
+  publishedMonthlyExpenses?: number | null;
+  totalSquareMeters?: number | null;
+  monthlyExpensesPerSquareMeter?: number | null;
+  benchmarkMonthlyExpensesPerSquareMeter?: number | null;
+  expenseBenchmarkComparison: string;
   unitValidationStatus?: string | null;
 };
 
@@ -436,6 +444,59 @@ export const AUTH_SESSION_EXPIRED_EVENT = 'propsegura:session-expired';
 
 export function getStoredAuthToken() {
   return window.localStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+type JwtPayload = {
+  exp?: number;
+};
+
+export function getJwtExpiration(token: string | null) {
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const [, payload] = token.split('.');
+
+    if (!payload) {
+      return null;
+    }
+
+    const normalizedPayload = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const paddedPayload = normalizedPayload.padEnd(normalizedPayload.length + ((4 - normalizedPayload.length % 4) % 4), '=');
+    const decoded = JSON.parse(window.atob(paddedPayload)) as JwtPayload;
+
+    return typeof decoded.exp === 'number'
+      ? decoded.exp * 1000
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isAuthTokenExpired(token = getStoredAuthToken()) {
+  const expiration = getJwtExpiration(token);
+
+  if (!expiration) {
+    return true;
+  }
+
+  return expiration <= Date.now() + 30_000;
+}
+
+export function getValidStoredAuthToken() {
+  const token = getStoredAuthToken();
+
+  if (!token) {
+    return null;
+  }
+
+  if (isAuthTokenExpired(token)) {
+    notifySessionExpired();
+    return null;
+  }
+
+  return token;
 }
 
 export function getStoredAuthUser(): AuthUser | null {
@@ -482,7 +543,7 @@ export function resolveApiUrl(path?: string | null) {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isMultipart = init?.body instanceof FormData;
-  const token = getStoredAuthToken();
+  const token = path === '/api/auth/login' ? null : getValidStoredAuthToken();
   const headers = new Headers(init?.headers);
 
   if (!isMultipart && !headers.has('Content-Type')) {
@@ -520,7 +581,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
-  const token = getStoredAuthToken();
+  const token = getValidStoredAuthToken();
   const headers = new Headers(init?.headers);
 
   if (token && !headers.has('Authorization')) {
