@@ -37,6 +37,7 @@ public sealed record PropertyAnalysisDto(
     decimal? EstimatedFairValueMaxUsd,
     decimal? SuggestedFirstOfferUsd,
     decimal? SuggestedTargetPriceUsd,
+    decimal? MaxRecommendedPriceUsd,
     decimal? NegotiationMarginPercent,
     string NegotiationExplanation,
     NegotiationAnalysisDto NegotiationAnalysis,
@@ -93,6 +94,7 @@ public sealed record NegotiationAnalysisDto(
     decimal? EstimatedFairValueMaxUsd,
     decimal? SuggestedFirstOfferUsd,
     decimal? SuggestedTargetPriceUsd,
+    decimal? MaxRecommendedPriceUsd,
     decimal? NegotiationMarginPercent,
     string Explanation);
 
@@ -224,6 +226,7 @@ public static class PropertyAnalysisMapping
             analysis.EstimatedFairValueMaxUsd,
             analysis.SuggestedFirstOfferUsd,
             analysis.SuggestedTargetPriceUsd,
+            analysis.MaxRecommendedPriceUsd,
             analysis.NegotiationMarginPercent,
             analysis.NegotiationExplanation,
             analysis.ToNegotiationAnalysisDto(),
@@ -329,6 +332,7 @@ public static class PropertyAnalysisMapping
             analysis.EstimatedFairValueMaxUsd,
             analysis.SuggestedFirstOfferUsd,
             analysis.SuggestedTargetPriceUsd,
+            analysis.MaxRecommendedPriceUsd,
             analysis.NegotiationMarginPercent,
             analysis.NegotiationExplanation);
     }

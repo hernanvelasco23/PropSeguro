@@ -315,6 +315,7 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
             {
                 row.RelativeItem().Element(item => MoneyCard(item, "Primera oferta sugerida", Usd(report.NegotiationSection.SuggestedFirstOfferUsd)));
                 row.RelativeItem().Element(item => MoneyCard(item, "Precio objetivo", Usd(report.NegotiationSection.SuggestedTargetPriceUsd)));
+                row.RelativeItem().Element(item => MoneyCard(item, "Maximo recomendado", Usd(report.NegotiationSection.MaxRecommendedPriceUsd)));
             });
 
             column.Item().Text(report.NegotiationSection.Explanation).FontSize(11).LineHeight(1.35f).FontColor(Text);
