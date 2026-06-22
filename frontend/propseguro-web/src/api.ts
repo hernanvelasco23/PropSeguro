@@ -30,6 +30,8 @@ export type CreateAnalysisRequest = {
   isCreditEligible?: boolean | null;
   propertyCondition?: PropertyCondition | null;
   notes?: string | null;
+  visitObservations?: string[] | null;
+  visitNotes?: string | null;
 };
 
 export type UpdateAnalysisRequest = CreateAnalysisRequest;
@@ -167,12 +169,15 @@ export type PropertyDocument = {
   analysisStatus: string;
   analyzedAtUtc?: string | null;
   analysisSummary?: string | null;
+  userConfirmedMatchesProperty: boolean;
+  userConfirmedMatchesPropertyAtUtc?: string | null;
   expenseValidation?: ExpenseDocumentValidation | null;
 };
 
 export type DocumentFinding = {
   id: string;
   propertyDocumentId: string;
+  code: string;
   severity: string;
   category: string;
   title: string;
@@ -215,7 +220,7 @@ export type ExpenseDocumentValidation = {
   detectedExpenseAmount?: number | null;
   extractionConfidence: string;
   confidenceScore: number;
-  classification: 'Validated' | 'PartiallyValidated' | 'NotValidated' | 'Mismatch';
+  classification: 'Validated' | 'PartiallyValidated' | 'NotValidated' | 'UnitVerificationPending' | 'ValueMismatch';
   label: string;
   explanation: string;
 };
@@ -242,6 +247,8 @@ export type PropertyAnalysis = {
   isCreditEligible?: boolean | null;
   propertyCondition: PropertyCondition;
   notes?: string | null;
+  visitObservations: string[];
+  visitNotes?: string | null;
   opportunityScore: number;
   protectionScore: number;
   initialRiskLevel: string;
@@ -305,6 +312,10 @@ export type PropertyReport = {
   overallRecommendation: string;
   overallRecommendationLabel: string;
   overallRecommendationExplanation: string;
+  identifiedRisks: string[];
+  detectedStrengths: string[];
+  zoneStrengths: string[];
+  negotiationLevers: string[];
   opportunitySection: PropertyReportOpportunitySection;
   protectionSection: PropertyReportProtectionSection;
   negotiationSection: PropertyReportNegotiationSection;
@@ -315,6 +326,7 @@ export type PropertyReport = {
   whatThisMeansForYou: string[];
   conditionsToAdvance: string[];
   moneyRisks: PropertyReportMoneyRisk[];
+  negotiationOpportunities: PropertyReportNegotiationOpportunity[];
   negotiationArguments: string[];
   questionsForSellerOrAgent: string[];
   questionsForNotaryOrLawyer: string[];
@@ -385,6 +397,7 @@ export type PropertyReportNegotiationSection = {
   marketPosition: string;
   marketPositionLabel: string;
   explanation: string;
+  suggestedStrategy: string;
 };
 
 export type PropertyReportDocumentsSection = {
@@ -405,6 +418,7 @@ export type PropertyReportDocumentTypeSection = {
 };
 
 export type PropertyReportExpensesSection = PropertyReportDocumentTypeSection & {
+  analysisSource: string;
   buildingHealthScore?: number | null;
   buildingHealthClassification?: string | null;
   documentConfidence?: ExpenseDocumentValidation | null;
@@ -414,7 +428,10 @@ export type PropertyReportExpensesSection = PropertyReportDocumentTypeSection & 
   monthlyExpensesPerSquareMeter?: number | null;
   benchmarkMonthlyExpensesPerSquareMeter?: number | null;
   expenseBenchmarkComparison: string;
+  publishedVsDocumentStatus: string;
   unitValidationStatus?: string | null;
+  documentConfirmedByUser: boolean;
+  documentConfirmedByUserAtUtc?: string | null;
 };
 
 export type PropertyReportFindingsSection = {
@@ -428,6 +445,13 @@ export type PropertyReportMoneyRisk = {
   suggestedAction: string;
   sourceDocumentType?: string | null;
   sourceDocumentLabel?: string | null;
+};
+
+export type PropertyReportNegotiationOpportunity = {
+  title: string;
+  description: string;
+  impact: string;
+  suggestedAction: string;
 };
 
 export type PropertyReportDocumentStatus = {
@@ -739,5 +763,11 @@ export function saveDocumentText(analysisId: string, documentId: string, payload
   return request<PropertyDocument>(`/api/property-analyses/${analysisId}/documents/${documentId}/text`, {
     method: 'PUT',
     body: JSON.stringify(payload)
+  });
+}
+
+export function confirmDocumentMatch(analysisId: string, documentId: string) {
+  return request<PropertyAnalysis>(`/api/property-analyses/${analysisId}/documents/${documentId}/confirm-match`, {
+    method: 'POST'
   });
 }

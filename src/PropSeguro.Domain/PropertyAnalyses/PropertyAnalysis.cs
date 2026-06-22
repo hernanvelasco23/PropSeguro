@@ -1,5 +1,7 @@
 namespace PropSeguro.Domain.PropertyAnalyses;
 
+using System.Text.Json;
+
 public sealed class PropertyAnalysis
 {
     private readonly List<PropertyDocument> _documents = [];
@@ -16,6 +18,7 @@ public sealed class PropertyAnalysis
         MarketPosition = MarketPosition.Unknown;
         BenchmarkComparison = "Sin benchmark";
         NegotiationExplanation = "Datos insuficientes para estimar un rango de negociacion.";
+        VisitObservationsJson = "[]";
     }
 
     public PropertyAnalysis(
@@ -67,6 +70,7 @@ public sealed class PropertyAnalysis
         BenchmarkComparison = "Sin benchmark";
         MarketPosition = MarketPosition.Unknown;
         NegotiationExplanation = "Datos insuficientes para estimar un rango de negociacion.";
+        VisitObservationsJson = "[]";
     }
 
     public Guid Id { get; private set; }
@@ -110,6 +114,8 @@ public sealed class PropertyAnalysis
     public long? CoverImageSizeBytes { get; private set; }
     public string? CoverImageStoragePath { get; private set; }
     public DateTime? CoverImageUploadedAtUtc { get; private set; }
+    public string VisitObservationsJson { get; private set; }
+    public string? VisitNotes { get; private set; }
     public AnalysisStatus Status { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
@@ -217,6 +223,37 @@ public sealed class PropertyAnalysis
         Notes = NormalizeOptionalText(notes);
 
         RecalculateOpportunityScore();
+        UpdatedAtUtc = DateTime.UtcNow;
+    }
+
+    public IReadOnlyCollection<string> GetVisitObservations()
+    {
+        if (string.IsNullOrWhiteSpace(VisitObservationsJson))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<string[]>(VisitObservationsJson) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    public void UpdateVisitObservations(IEnumerable<string>? visitObservations, string? visitNotes)
+    {
+        var normalizedObservations = (visitObservations ?? [])
+            .Select(NormalizeOptionalText)
+            .Where(value => value is not null)
+            .Select(value => value!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        VisitObservationsJson = JsonSerializer.Serialize(normalizedObservations);
+        VisitNotes = NormalizeOptionalText(visitNotes);
         UpdatedAtUtc = DateTime.UtcNow;
     }
 

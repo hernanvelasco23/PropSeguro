@@ -15,10 +15,12 @@ import {
   PropertyAnalysisSummary,
   PropertyCondition,
   PropertyDocument,
+  UpdateAnalysisRequest,
   approveBetaAccessRequest,
   addDocument,
   analyzeDocument,
   clearStoredAuth,
+  confirmDocumentMatch,
   createProtectedAssetUrl,
   createAnalysis,
   createBetaAccessRequest,
@@ -126,7 +128,21 @@ type ApprovalNotice = {
   tone: 'success' | 'warning' | 'info' | 'neutral';
 };
 
-type WorkspaceTab = 'general' | 'price' | 'documents' | 'findings' | 'report';
+type WorkspaceTab = 'general' | 'price' | 'documents' | 'observations' | 'findings' | 'report';
+
+const visitObservationOptions = [
+  'Humedad',
+  'Grietas',
+  'Olor a humedad',
+  'Problemas eléctricos',
+  'Problemas de agua',
+  'Falta de ventilación',
+  'Falta de luz natural',
+  'Ruidos',
+  'Ascensor deficiente',
+  'Fachada deteriorada',
+  'Otro'
+];
 
 type DocumentOperationStage = 'uploading' | 'extracting' | 'ready' | 'failed';
 
@@ -1974,8 +1990,6 @@ function CreateAnalysisForm({
           </aside>
         </div>
 
-        <AnalysisScopeCard />
-
         <div className="wizard-disclaimer">
           <span aria-hidden="true">◇</span>
           <p><strong>Recordá:</strong> PropSegura te da una segunda opinión experta. No reemplaza la revisión de un escribano o abogado.</p>
@@ -2046,36 +2060,6 @@ function WizardInfoCard({
         <p>{text}</p>
       </div>
     </article>
-  );
-}
-
-function AnalysisScopeCard() {
-  return (
-    <section className="wizard-analysis-card">
-      <h3>¿Qué analizamos en PropSegura?</h3>
-      <div>
-        <article>
-          <span aria-hidden="true">↗</span>
-          <strong>Oportunidad</strong>
-          <p>Evaluamos precio, zona y relación precio/m² para determinar la oportunidad.</p>
-        </article>
-        <article>
-          <span aria-hidden="true">⚖</span>
-          <strong>Riesgos legales</strong>
-          <p>Revisamos documentación, cláusulas y antecedentes legales de la propiedad.</p>
-        </article>
-        <article>
-          <span aria-hidden="true">▥</span>
-          <strong>Riesgos edilicios</strong>
-          <p>Analizamos estado del edificio, expensas, deudas y problemas estructurales.</p>
-        </article>
-        <article>
-          <span aria-hidden="true">$</span>
-          <strong>Riesgos financieros</strong>
-          <p>Evaluamos rentabilidad, costos ocultos y proyecciones de inversión.</p>
-        </article>
-      </div>
-    </section>
   );
 }
 
@@ -2383,8 +2367,9 @@ function AnalysisDetail({
           <WorkspaceStep title="Información básica" text="Completado" state={activeTab === 'general' ? 'active' : 'done'} number="1" onClick={() => setActiveTab('general')} />
           <WorkspaceStep title="Precio y características" text="Completado" state={activeTab === 'price' ? 'active' : 'done'} number="2" onClick={() => setActiveTab('price')} />
           <WorkspaceStep title="Documentación" text={checklistStats.percent >= 100 ? 'Completado' : 'En progreso'} state={activeTab === 'documents' ? 'active' : checklistStats.percent >= 100 ? 'done' : 'pending'} number="3" onClick={() => setActiveTab('documents')} />
-          <WorkspaceStep title="Análisis y hallazgos" text={analysisStatus.findingsText} state={activeTab === 'findings' ? 'active' : analysisStatus.findingsDone ? 'done' : 'pending'} number="4" onClick={() => setActiveTab('findings')} />
-          <WorkspaceStep title="Informe final" text={report ? 'Informe generado' : 'Informe pendiente'} state={activeTab === 'report' ? 'active' : report ? 'done' : 'pending'} number="5" onClick={() => setActiveTab('report')} />
+          <WorkspaceStep title="Observaciones" text={(analysis.visitObservations ?? []).length > 0 ? `${(analysis.visitObservations ?? []).length} registradas` : 'Opcional'} state={activeTab === 'observations' ? 'active' : (analysis.visitObservations ?? []).length > 0 ? 'done' : 'pending'} number="4" onClick={() => setActiveTab('observations')} />
+          <WorkspaceStep title="Análisis y hallazgos" text={analysisStatus.findingsText} state={activeTab === 'findings' ? 'active' : analysisStatus.findingsDone ? 'done' : 'pending'} number="5" onClick={() => setActiveTab('findings')} />
+          <WorkspaceStep title="Informe final" text={report ? 'Informe generado' : 'Informe pendiente'} state={activeTab === 'report' ? 'active' : report ? 'done' : 'pending'} number="6" onClick={() => setActiveTab('report')} />
         </div>
         <div className="wizard-help-card edit-sidebar-help">
           <span className="wizard-help-icon" aria-hidden="true">◇</span>
@@ -2434,6 +2419,7 @@ function AnalysisDetail({
           <button className={activeTab === 'general' ? 'active' : ''} type="button" onClick={() => setActiveTab('general')}>⌂ General</button>
           <button className={activeTab === 'price' ? 'active' : ''} type="button" onClick={() => setActiveTab('price')}>◇ Precio y características</button>
           <button className={activeTab === 'documents' ? 'active' : ''} type="button" onClick={() => setActiveTab('documents')}>▤ Documentos</button>
+          <button className={activeTab === 'observations' ? 'active' : ''} type="button" onClick={() => setActiveTab('observations')}>□ Observaciones</button>
           <button className={activeTab === 'findings' ? 'active' : ''} type="button" onClick={() => setActiveTab('findings')}>◌ Hallazgos</button>
           <button className={activeTab === 'report' ? 'active' : ''} type="button" onClick={() => setActiveTab('report')}>▧ Informe</button>
         </nav>
@@ -2453,7 +2439,6 @@ function AnalysisDetail({
               />
             </section>
 
-            <AnalysisScopeCard />
           </div>
 
           <aside className="edit-right-rail">
@@ -2498,6 +2483,15 @@ function AnalysisDetail({
           selectedDocumentType={selectedDocumentType}
           onSelectDocumentType={setSelectedDocumentType}
           onRefresh={onRefresh}
+          onError={onError}
+          setLoading={setLoading}
+        />
+        )}
+
+        {activeTab === 'observations' && (
+        <VisitObservationsPanel
+          analysis={analysis}
+          onSaved={onAnalysisUpdated}
           onError={onError}
           setLoading={setLoading}
         />
@@ -2645,6 +2639,17 @@ function PropertyReportPanel({
         </div>
       </div>
 
+      <div className="report-grid report-list-grid report-advisory-grid">
+        <ReportList title="Riesgos identificados" items={report.identifiedRisks} emptyText="No se detectaron riesgos específicos con la información cargada." />
+        {report.detectedStrengths.length > 0 && (
+          <ReportList title="Fortalezas detectadas" items={report.detectedStrengths} emptyText="" />
+        )}
+        {report.zoneStrengths.length > 0 && (
+          <ReportList title="Fortalezas de la zona" items={report.zoneStrengths} emptyText="" />
+        )}
+        <ReportList title="Palancas de negociación" items={report.negotiationLevers} emptyText="No se detectaron palancas específicas de negociación con la información cargada." />
+      </div>
+
       <article className={`report-recommendation report-recommendation-${recommendationTone}`}>
         <Badge tone={recommendationTone}>{report.overallRecommendationLabel}</Badge>
         <h3>Conclusión ejecutiva</h3>
@@ -2661,12 +2666,8 @@ function PropertyReportPanel({
         <Info label="BuildingHealthScore" value={formatNumber(report.expensesSection.buildingHealthScore)} />
       </div>
 
-      <div className="report-grid report-list-grid">
-        <ReportList title="Qué significa esto para vos" items={report.whatThisMeansForYou} emptyText="Todavía faltan datos para generar consecuencias concretas." />
-        <ReportList title="Condiciones mínimas para avanzar" items={report.conditionsToAdvance} emptyText="No hay condiciones específicas detectadas." />
-      </div>
-
       <ReportMoneyRisks risks={report.moneyRisks} />
+      <ReportNegotiationOpportunities opportunities={report.negotiationOpportunities} />
 
       <div className="report-grid">
         <ReportCard title="Datos de la propiedad">
@@ -2691,7 +2692,8 @@ function PropertyReportPanel({
           </div>
         </ReportCard>
 
-        <ReportCard title="Negociación">
+        <ReportCard title="Estrategia sugerida">
+          <p>{report.negotiationSection.suggestedStrategy}</p>
           <p>{report.negotiationSection.explanation}</p>
           <div className="summary-grid compact-report-grid">
             <Info label="Precio publicado" value={formatMoney(report.negotiationSection.publishedPriceUsd)} />
@@ -2721,7 +2723,9 @@ function PropertyReportPanel({
       <ReportFindingsSection section={report.findingsSection} />
 
       <div className="report-grid report-list-grid">
-        <ReportList title="Argumentos para negociar" items={report.negotiationArguments} emptyText="No hay argumentos fuertes por ahora." />
+        <ReportList title="Qué significa esto para vos" items={report.whatThisMeansForYou} emptyText="Todavía faltan datos para generar consecuencias concretas." />
+        <ReportList title="Condiciones mínimas para avanzar" items={report.conditionsToAdvance} emptyText="No hay condiciones específicas detectadas." />
+        <ReportList title="Puntos principales para negociar" items={report.negotiationArguments.slice(0, 3)} emptyText="No hay argumentos fuertes por ahora." />
         <ReportList title="Preguntas para la inmobiliaria o el vendedor" items={report.questionsForSellerOrAgent} emptyText="No hay preguntas sugeridas por ahora." />
         <ReportList title="Preguntas para escribano o abogado" items={report.questionsForNotaryOrLawyer} emptyText="No hay preguntas legales sugeridas por ahora." />
         <ReportList title="Próximos pasos" items={report.nextSteps} emptyText="No hay próximos pasos sugeridos." />
@@ -2782,18 +2786,27 @@ function ReportExpensesSection({ section }: { section: PropertyReport['expensesS
   return (
     <ReportCard title="Expensas">
       <div className="summary-grid compact-report-grid expense-benchmark-grid">
+        <Info label="Fuente del analisis" value={section.analysisSource} />
         <Info label="Expensas publicadas" value={formatMoney(section.publishedMonthlyExpenses)} />
+        <Info label="Expensas en documento" value={formatMoney(section.detectedExpenseAmount)} />
+        <Info label="Publicacion vs documento" value={section.publishedVsDocumentStatus} />
         <Info label="Metros usados" value={formatNumber(section.totalSquareMeters)} />
         <Info label="Expensas ARS/m2" value={formatMoney(section.monthlyExpensesPerSquareMeter)} />
         <Info label="Benchmark zona ARS/m2" value={formatMoney(section.benchmarkMonthlyExpensesPerSquareMeter)} />
+        <Info label="Unidad" value={section.unitValidationStatus ?? 'Pendiente'} />
       </div>
       <div className="expense-benchmark-note">
         <Badge tone={expenseBenchmarkTone}>{section.expenseBenchmarkComparison}</Badge>
         <p>Formula: expensas mensuales / m2 totales. No se compara ARS contra USD.</p>
       </div>
-      {!section.isAvailable || !section.isAnalyzed ? (
+      {!section.isAvailable ? (
         <div className="empty-state compact-empty">
-          <strong>Expensas no analizadas todavia.</strong>
+          <strong>Sin documento de expensas cargado.</strong>
+          <p>{section.status}</p>
+        </div>
+      ) : !section.isAnalyzed ? (
+        <div className="empty-state compact-empty">
+          <strong>Documento de expensas pendiente de analisis.</strong>
           <p>{section.status}</p>
         </div>
       ) : (
@@ -2802,8 +2815,7 @@ function ReportExpensesSection({ section }: { section: PropertyReport['expensesS
             <Info label="Salud edificio" value={formatNumber(section.buildingHealthScore)} />
             <Info label="Clasificacion" value={section.buildingHealthClassification ?? 'Sin dato'} />
             <Info label="Confianza" value={section.documentConfidence ? `${section.documentConfidence.confidenceScore}%` : 'Sin dato'} />
-            <Info label="Expensa detectada" value={formatMoney(section.detectedExpenseAmount)} />
-            <Info label="Unidad" value={section.unitValidationStatus ?? 'Sin dato'} />
+            <Info label="Confirmado por usuario" value={section.documentConfirmedByUser ? 'Si' : 'No'} />
           </div>
           <ReportFindingPreview findings={section.keyFindings} />
         </>
@@ -2841,6 +2853,48 @@ function ReportMoneyRisks({ risks }: { risks: PropertyReport['moneyRisks'] }) {
       </div>
     </ReportCard>
   );
+}
+
+function ReportNegotiationOpportunities({ opportunities }: { opportunities: PropertyReport['negotiationOpportunities'] }) {
+  if (opportunities.length === 0) {
+    return (
+      <ReportCard title="Oportunidades de negociación detectadas">
+        <div className="empty-state compact-empty">
+          <strong>No se detectaron oportunidades específicas de negociación con la información cargada.</strong>
+          <p>Sumá observaciones de la visita o documentos para que PropSegura transforme esas señales en argumentos concretos.</p>
+        </div>
+      </ReportCard>
+    );
+  }
+
+  return (
+    <ReportCard title="Oportunidades de negociación detectadas">
+      <div className="negotiation-opportunity-list">
+        {opportunities.map((opportunity) => (
+          <article key={opportunity.title} className="negotiation-opportunity-card">
+            <div className="negotiation-opportunity-header">
+              <h4>{opportunity.title}</h4>
+              <Badge tone={opportunityImpactTone(opportunity.impact)}>{opportunity.impact}</Badge>
+            </div>
+            <p>{opportunity.description}</p>
+            <p><strong>Acción sugerida:</strong> {opportunity.suggestedAction}</p>
+          </article>
+        ))}
+      </div>
+    </ReportCard>
+  );
+}
+
+function opportunityImpactTone(impact: string) {
+  if (impact === 'Alto') {
+    return 'critical';
+  }
+
+  if (impact === 'Medio') {
+    return 'warning';
+  }
+
+  return 'info';
 }
 
 function ReportDocumentsChecklist({
@@ -3227,6 +3281,104 @@ function Checklist({ items }: { items: ChecklistItem[] }) {
   );
 }
 
+function VisitObservationsPanel({
+  analysis,
+  onSaved,
+  onError,
+  setLoading
+}: {
+  analysis: PropertyAnalysis;
+  onSaved: (analysis: PropertyAnalysis) => void;
+  onError: (message: string | null) => void;
+  setLoading: (loading: boolean) => void;
+}) {
+  const [selectedObservations, setSelectedObservations] = useState<string[]>(() => analysis.visitObservations ?? []);
+  const [visitNotes, setVisitNotes] = useState(() => analysis.visitNotes ?? '');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setSelectedObservations(analysis.visitObservations ?? []);
+    setVisitNotes(analysis.visitNotes ?? '');
+  }, [analysis.id, analysis.visitObservations, analysis.visitNotes]);
+
+  const observationCount = selectedObservations.length;
+
+  function toggleObservation(observation: string) {
+    setSelectedObservations((current) =>
+      current.includes(observation)
+        ? current.filter((item) => item !== observation)
+        : [...current, observation]
+    );
+  }
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setLoading(true);
+    onError(null);
+
+    try {
+      const updated = await updateAnalysis(analysis.id, {
+        ...buildUpdateRequestFromAnalysis(analysis),
+        visitObservations: selectedObservations,
+        visitNotes: nullableText(visitNotes)
+      });
+
+      onSaved(updated);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'No se pudieron guardar las observaciones de la visita.');
+    } finally {
+      setSaving(false);
+      setLoading(false);
+    }
+  }
+
+  return (
+    <section className="panel visit-observations-panel">
+      <div className="section-heading compact-heading">
+        <div>
+          <p className="eyebrow">Visita</p>
+          <h3>Observaciones de la visita</h3>
+        </div>
+        <Badge tone={observationCount > 0 ? 'info' : 'neutral'}>
+          {observationCount > 0 ? `${observationCount} observaciones registradas` : 'Sin observaciones registradas'}
+        </Badge>
+      </div>
+
+      <form className="visit-observations-form" onSubmit={handleSubmit}>
+        <div className="visit-observation-grid">
+          {visitObservationOptions.map((observation) => (
+            <label className="visit-observation-option" key={observation}>
+              <input
+                type="checkbox"
+                checked={selectedObservations.includes(observation)}
+                onChange={() => toggleObservation(observation)}
+              />
+              <span>{observation}</span>
+            </label>
+          ))}
+        </div>
+
+        <label className="field visit-notes-field">
+          <span>Notas de la visita</span>
+          <textarea
+            value={visitNotes}
+            placeholder="Describí cualquier situación observada durante la visita que consideres relevante para la negociación o evaluación."
+            onChange={(event) => setVisitNotes(event.target.value)}
+          />
+        </label>
+
+        <div className="edit-inline-actions">
+          <button className={`primary-button ${saving ? 'btn-loading' : ''}`} type="submit" disabled={saving} aria-busy={saving ? 'true' : undefined}>
+            {saving && <span className="button-spinner" aria-hidden="true" />}
+            {saving ? 'Guardando...' : 'Guardar observaciones'}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 function DocumentWorkspace({
   analysis,
   selectedDocumentType,
@@ -3314,6 +3466,7 @@ function DocumentWorkspace({
           ) : (
             <SelectedDocumentWorkspace
               analysisId={analysis.id}
+              analysis={analysis}
               documentType={selectedDocumentType}
               document={activeDocument}
               olderDocumentsCount={Math.max(0, selectedDocuments.length - 1)}
@@ -3335,6 +3488,7 @@ function DocumentWorkspace({
           ) : (
             <SelectedDocumentWorkspace
               analysisId={analysis.id}
+              analysis={analysis}
               documentType={selectedDocumentType}
               document={activeDocument}
               olderDocumentsCount={Math.max(0, selectedDocuments.length - 1)}
@@ -3560,6 +3714,7 @@ function DocumentTypeItem({
 
 function SelectedDocumentWorkspace({
   analysisId,
+  analysis,
   documentType,
   document,
   olderDocumentsCount,
@@ -3571,6 +3726,7 @@ function SelectedDocumentWorkspace({
   onOperation
 }: {
   analysisId: string;
+  analysis: PropertyAnalysis;
   documentType: DocumentType;
   document: PropertyDocument | null;
   olderDocumentsCount: number;
@@ -3647,6 +3803,7 @@ function SelectedDocumentWorkspace({
 
           <DocumentCard
             analysisId={analysisId}
+            analysis={analysis}
             document={document}
             findings={findings}
             onRefresh={onRefresh}
@@ -4012,6 +4169,7 @@ function GroupedFindings({
 
 function DocumentCard({
   analysisId,
+  analysis,
   document,
   findings,
   onRefresh,
@@ -4019,6 +4177,7 @@ function DocumentCard({
   setLoading
 }: {
   analysisId: string;
+  analysis?: Pick<PropertyAnalysis, 'floor' | 'apartmentUnit' | 'unitIdentifier' | 'monthlyExpenses'>;
   document: PropertyDocument;
   findings: DocumentFinding[];
   onRefresh: () => Promise<void>;
@@ -4029,6 +4188,7 @@ function DocumentCard({
   const [isEditingText, setIsEditingText] = useState(false);
   const [savingText, setSavingText] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmingMatch, setConfirmingMatch] = useState(false);
   const suggestedQuestions = uniqueStrings(findings.map((finding) => finding.suggestedQuestion));
   const suggestedNegotiationPoints = uniqueStrings(findings.map((finding) => finding.suggestedNegotiationPoint ?? finding.suggestedChange));
   const documentRisk = documentRiskLevel(findings);
@@ -4070,6 +4230,22 @@ function DocumentCard({
     }
   }
 
+  async function handleConfirmMatch() {
+    setConfirmingMatch(true);
+    setLoading(true);
+    onError(null);
+
+    try {
+      await confirmDocumentMatch(analysisId, document.id);
+      await onRefresh();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'No se pudo confirmar el documento.');
+    } finally {
+      setConfirmingMatch(false);
+      setLoading(false);
+    }
+  }
+
   return (
     <article className="document-card">
       <div className="document-header">
@@ -4097,12 +4273,32 @@ function DocumentCard({
           <div>
             <strong>{document.expenseValidation.label}</strong>
             <p>{document.expenseValidation.explanation}</p>
+            {document.userConfirmedMatchesProperty && (
+              <p className="summary-note">Confirmaste que este documento corresponde a la propiedad.</p>
+            )}
           </div>
           <div className="expense-validation-grid">
             <Info label="Confianza" value={`${document.expenseValidation.confidenceScore}%`} />
+            <Info label="Unidad cargada" value={analysis ? formatLoadedExpenseUnit(analysis) : 'Sin dato'} />
             <Info label="Unidad detectada" value={formatDetectedExpenseUnit(document.expenseValidation)} />
+            <Info label="Expensa cargada" value={formatMoney(analysis?.monthlyExpenses)} />
             <Info label="Expensa detectada" value={formatMoney(document.expenseValidation.detectedExpenseAmount)} />
           </div>
+          {document.expenseValidation.classification === 'UnitVerificationPending' && !document.userConfirmedMatchesProperty && (
+            <div className="document-match-actions">
+              <button
+                className={`secondary-button ${confirmingMatch ? 'btn-loading' : ''}`}
+                type="button"
+                onClick={handleConfirmMatch}
+                disabled={confirmingMatch}
+                aria-busy={confirmingMatch ? 'true' : undefined}
+              >
+                {confirmingMatch && <span className="button-spinner" aria-hidden="true" />}
+                Confirmar que corresponde a la propiedad
+              </button>
+              <span>Si no corresponde, reemplazalo con “Subir nuevo archivo”.</span>
+            </div>
+          )}
         </div>
       )}
       <div className="text-workflow">
@@ -4672,7 +4868,7 @@ function reportRecommendationTone(value: string) {
     AdvanceWithCaution: 'info',
     WaitForDocuments: 'warning',
     Renegotiate: 'warning',
-    Avoid: 'danger',
+    ProfessionalReview: 'danger',
     InsufficientData: 'neutral'
   };
 
@@ -4815,6 +5011,24 @@ function formatDetectedExpenseUnit(validation: ExpenseDocumentValidation) {
   return parts.length === 0 ? 'Sin dato' : parts.join(' · ');
 }
 
+function formatLoadedExpenseUnit(analysis: Pick<PropertyAnalysis, 'floor' | 'apartmentUnit' | 'unitIdentifier'>) {
+  const parts = [];
+
+  if (analysis.floor != null) {
+    parts.push(`Piso ${analysis.floor}`);
+  }
+
+  if (analysis.apartmentUnit) {
+    parts.push(`Depto ${analysis.apartmentUnit}`);
+  }
+
+  if (analysis.unitIdentifier) {
+    parts.push(`UF ${analysis.unitIdentifier}`);
+  }
+
+  return parts.length === 0 ? 'Sin dato' : parts.join(' - ');
+}
+
 function formStateFromAnalysis(analysis: PropertyAnalysis): CreateFormState {
   return {
     title: analysis.title,
@@ -4837,6 +5051,33 @@ function formStateFromAnalysis(analysis: PropertyAnalysis): CreateFormState {
     isCreditEligible: booleanToFormValue(analysis.isCreditEligible),
     propertyCondition: analysis.propertyCondition,
     notes: analysis.notes ?? ''
+  };
+}
+
+function buildUpdateRequestFromAnalysis(analysis: PropertyAnalysis): UpdateAnalysisRequest {
+  return {
+    title: analysis.title,
+    listingUrl: analysis.listingUrl ?? null,
+    address: analysis.address,
+    neighborhood: analysis.neighborhood,
+    priceUsd: analysis.priceUsd ?? null,
+    monthlyExpenses: analysis.monthlyExpenses ?? null,
+    totalSquareMeters: analysis.totalSquareMeters ?? null,
+    coveredSquareMeters: analysis.coveredSquareMeters ?? null,
+    rooms: analysis.rooms ?? null,
+    bedrooms: analysis.bedrooms ?? null,
+    bathrooms: analysis.bathrooms ?? null,
+    buildingAgeYears: analysis.buildingAgeYears ?? null,
+    floor: analysis.floor ?? null,
+    apartmentUnit: analysis.apartmentUnit ?? null,
+    unitIdentifier: analysis.unitIdentifier ?? null,
+    hasBalcony: analysis.hasBalcony ?? null,
+    hasAmenities: analysis.hasAmenities ?? null,
+    isCreditEligible: analysis.isCreditEligible ?? null,
+    propertyCondition: analysis.propertyCondition,
+    notes: analysis.notes ?? null,
+    visitObservations: analysis.visitObservations ?? [],
+    visitNotes: analysis.visitNotes ?? null
   };
 }
 
@@ -4989,7 +5230,7 @@ function getDashboardOpinion(analysis: PropertyAnalysisSummary) {
   if (analysis.recommendedUse === 'NotRecommended' || analysis.opportunityScore < 45 || analysis.criticalFindingsCount > 0) {
     return {
       icon: '●',
-      label: 'No la compraría',
+      label: 'Revisar con profesional',
       tone: 'danger'
     };
   }
@@ -4997,14 +5238,14 @@ function getDashboardOpinion(analysis: PropertyAnalysisSummary) {
   if (analysis.protectionScore < 55 || analysis.missingRequiredDocumentsCount > 0 || analysis.findingsCount > 0) {
     return {
       icon: '●',
-      label: 'Esperaría documentación',
+      label: 'Resolver pendientes',
       tone: 'warning'
     };
   }
 
   return {
     icon: '●',
-    label: 'Seguiría avanzando',
+    label: 'Avanzar',
     tone: 'success'
   };
 }
@@ -5095,20 +5336,20 @@ function getAnalysisProgressPercent(analysis: PropertyAnalysis, checklistStats: 
 function getAnalysisOpinion(analysis: PropertyAnalysis, checklistStats: ChecklistStats) {
   if (analysis.recommendedUse === 'NotRecommended' || analysis.opportunityScore < 45 || analysis.riskFindings.some((finding) => finding.severity === 'Critical')) {
     return {
-      label: 'No la compraría',
+      label: 'Revisar con profesional',
       tone: 'danger'
     };
   }
 
   if (analysis.protectionScore < 55 || checklistStats.percent < 100 || analysis.documentFindings.length > 0) {
     return {
-      label: 'Esperaría documentación',
+      label: 'Resolver pendientes',
       tone: 'warning'
     };
   }
 
   return {
-    label: 'Seguiría avanzando',
+    label: 'Avanzar',
     tone: 'success'
   };
 }
@@ -5194,7 +5435,7 @@ function getReportConsistencyNote(report: PropertyReport) {
     report.findingsSection.groups.some((group) => group.severity === 'Critical' || group.severity === 'High');
   const missingDocuments = report.documentsSection.missingDocumentsCount;
 
-  if (opportunityScore >= 70 && (recommendation === 'Avoid' || recommendation === 'WaitForDocuments' || hasCriticalFindings || missingDocuments > 0)) {
+  if (opportunityScore >= 70 && (recommendation === 'ProfessionalReview' || recommendation === 'WaitForDocuments' || hasCriticalFindings || missingDocuments > 0)) {
     if (hasCriticalFindings) {
       return 'La oportunidad de mercado es buena, pero los riesgos documentales detectados impiden recomendar avanzar sin revisión profesional.';
     }
@@ -5274,7 +5515,7 @@ function recommendedUseLabel(use: string) {
     Living: 'Vivienda',
     Investment: 'Inversión',
     Both: 'Vivienda e inversión',
-    NotRecommended: 'No recomendado',
+    NotRecommended: 'Requiere mas analisis',
     Unknown: 'Sin recomendación'
   };
 

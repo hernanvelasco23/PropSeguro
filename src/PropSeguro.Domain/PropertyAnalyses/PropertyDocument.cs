@@ -63,6 +63,8 @@ public sealed class PropertyDocument
     public DocumentAnalysisStatus AnalysisStatus { get; private set; }
     public DateTime? AnalyzedAtUtc { get; private set; }
     public string? AnalysisSummary { get; private set; }
+    public bool UserConfirmedMatchesProperty { get; private set; }
+    public DateTime? UserConfirmedMatchesPropertyAtUtc { get; private set; }
 
     public void StoreExtractedText(
         string? extractedText,
@@ -144,6 +146,12 @@ public sealed class PropertyDocument
         CompleteAnalysis(selection.Text, selection.Source, findings);
 
         return findings;
+    }
+
+    public void ConfirmMatchesProperty()
+    {
+        UserConfirmedMatchesProperty = true;
+        UserConfirmedMatchesPropertyAtUtc = DateTime.UtcNow;
     }
 
     private static TextExtractionQuality ClassifyTextQuality(string? text)

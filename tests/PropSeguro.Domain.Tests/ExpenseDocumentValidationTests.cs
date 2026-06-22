@@ -22,17 +22,17 @@ public sealed class ExpenseDocumentValidationTests
     }
 
     [Fact]
-    public void Expense_document_different_unit_creates_high_finding()
+    public void Expense_document_different_unit_creates_unit_verification_finding()
     {
         var analysis = CreateAnalysis(floor: 8, apartmentUnit: "B");
         var document = CreateExpenseDocument(analysis);
 
         var result = ExpenseDocumentValidator.Validate(analysis, document, "Piso 7 Depto A Total expensas $ 100.000");
 
-        Assert.Equal("Mismatch", result.Classification);
+        Assert.Equal("UnitVerificationPending", result.Classification);
         Assert.Contains(result.Findings, finding =>
-            finding.Severity == FindingSeverity.High &&
-            finding.Title == "Las expensas podrian corresponder a otra unidad");
+            finding.Severity == FindingSeverity.Medium &&
+            finding.Title == "Verificacion pendiente de unidad");
     }
 
     [Fact]
@@ -64,29 +64,45 @@ public sealed class ExpenseDocumentValidationTests
     }
 
     [Fact]
-    public void Expense_amount_differs_more_than_fifteen_percent_creates_high_finding()
+    public void Expense_amount_differs_more_than_twenty_five_percent_creates_high_finding()
     {
         var analysis = CreateAnalysis(floor: 8, apartmentUnit: "B", monthlyExpenses: 100000);
         var document = CreateExpenseDocument(analysis);
 
         var result = ExpenseDocumentValidator.Validate(analysis, document, "Piso 8 Depto B Importe $ 130.000");
 
-        Assert.Equal("Mismatch", result.Classification);
+        Assert.Equal("ValueMismatch", result.Classification);
         Assert.Contains(result.Findings, finding =>
             finding.Severity == FindingSeverity.High &&
-            finding.Title == "Las expensas del documento no coinciden con la publicacion");
+            finding.Title == "Las expensas del documento difieren del valor publicado");
     }
 
     [Fact]
-    public void Expense_amount_close_enough_does_not_create_mismatch()
+    public void Expense_amount_between_ten_and_twenty_five_percent_creates_medium_warning()
     {
         var analysis = CreateAnalysis(floor: 8, apartmentUnit: "B", monthlyExpenses: 100000);
         var document = CreateExpenseDocument(analysis);
 
         var result = ExpenseDocumentValidator.Validate(analysis, document, "Piso 8 Depto B Expensas del mes $ 112.000");
 
+        Assert.Equal("PartiallyValidated", result.Classification);
+        Assert.Contains(result.Findings, finding =>
+            finding.Severity == FindingSeverity.Medium &&
+            finding.Title == "Diferencia moderada entre expensas publicadas y documento");
+        Assert.DoesNotContain(result.Findings, finding => finding.Title == "Las expensas del documento difieren del valor publicado");
+    }
+
+    [Fact]
+    public void Expense_amount_under_ten_percent_is_validated()
+    {
+        var analysis = CreateAnalysis(floor: 8, apartmentUnit: "B", monthlyExpenses: 100000);
+        var document = CreateExpenseDocument(analysis);
+
+        var result = ExpenseDocumentValidator.Validate(analysis, document, "Piso 8 Depto B Expensas del mes $ 108.000");
+
         Assert.Equal("Validated", result.Classification);
-        Assert.DoesNotContain(result.Findings, finding => finding.Title == "Las expensas del documento no coinciden con la publicacion");
+        Assert.DoesNotContain(result.Findings, finding => finding.Title == "Diferencia moderada entre expensas publicadas y documento");
+        Assert.DoesNotContain(result.Findings, finding => finding.Title == "Las expensas del documento difieren del valor publicado");
     }
 
     [Fact]

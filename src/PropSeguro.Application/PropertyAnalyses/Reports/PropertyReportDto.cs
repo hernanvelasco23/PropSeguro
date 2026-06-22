@@ -12,6 +12,10 @@ public sealed record PropertyReportDto(
     string OverallRecommendation,
     string OverallRecommendationLabel,
     string OverallRecommendationExplanation,
+    IReadOnlyCollection<string> IdentifiedRisks,
+    IReadOnlyCollection<string> DetectedStrengths,
+    IReadOnlyCollection<string> ZoneStrengths,
+    IReadOnlyCollection<string> NegotiationLevers,
     PropertyReportOpportunitySectionDto OpportunitySection,
     PropertyReportProtectionSectionDto ProtectionSection,
     PropertyReportNegotiationSectionDto NegotiationSection,
@@ -22,6 +26,7 @@ public sealed record PropertyReportDto(
     IReadOnlyCollection<string> WhatThisMeansForYou,
     IReadOnlyCollection<string> ConditionsToAdvance,
     IReadOnlyCollection<PropertyReportMoneyRiskDto> MoneyRisks,
+    IReadOnlyCollection<PropertyReportNegotiationOpportunityDto> NegotiationOpportunities,
     IReadOnlyCollection<string> NegotiationArguments,
     IReadOnlyCollection<string> QuestionsForSellerOrAgent,
     IReadOnlyCollection<string> QuestionsForNotaryOrLawyer,
@@ -88,7 +93,8 @@ public sealed record PropertyReportNegotiationSectionDto(
     decimal? NegotiationMarginPercent,
     string MarketPosition,
     string MarketPositionLabel,
-    string Explanation);
+    string Explanation,
+    string SuggestedStrategy);
 
 public sealed record PropertyReportDocumentsSectionDto(
     int RequiredDocumentsCount,
@@ -116,6 +122,7 @@ public sealed record PropertyReportExpensesSectionDto(
     bool IsAvailable,
     bool IsAnalyzed,
     string Status,
+    string AnalysisSource,
     int? BuildingHealthScore,
     string? BuildingHealthClassification,
     ExpenseDocumentValidationDto? DocumentConfidence,
@@ -125,7 +132,10 @@ public sealed record PropertyReportExpensesSectionDto(
     decimal? MonthlyExpensesPerSquareMeter,
     decimal? BenchmarkMonthlyExpensesPerSquareMeter,
     string ExpenseBenchmarkComparison,
+    string PublishedVsDocumentStatus,
     string? UnitValidationStatus,
+    bool DocumentConfirmedByUser,
+    DateTime? DocumentConfirmedByUserAtUtc,
     IReadOnlyCollection<DocumentFindingDto> KeyFindings,
     IReadOnlyCollection<string> SuggestedQuestions,
     IReadOnlyCollection<string> SuggestedNegotiationPoints);
@@ -145,6 +155,12 @@ public sealed record PropertyReportMoneyRiskDto(
     string SuggestedAction,
     string? SourceDocumentType,
     string? SourceDocumentLabel);
+
+public sealed record PropertyReportNegotiationOpportunityDto(
+    string Title,
+    string Description,
+    string Impact,
+    string SuggestedAction);
 
 public sealed record PropertyReportDocumentStatusDto(
     string DocumentType,

@@ -217,6 +217,24 @@ public sealed class PropertyAnalysisTests
             analysis.AddDocument(Guid.NewGuid(), DocumentType.Expenses, "expensas.pdf", "application/pdf", 0, "storage/test/original.pdf"));
     }
 
+    [Fact]
+    public void UpdateVisitObservations_persists_visit_notes_without_changing_scores()
+    {
+        var analysis = CreateAnalysis();
+        analysis.RunInitialAnalysis();
+        var opportunityScore = analysis.OpportunityScore;
+        var protectionScore = analysis.ProtectionScore;
+
+        analysis.UpdateVisitObservations(
+            ["Humedad", "Grietas", "Humedad", ""],
+            "Mancha visible en dormitorio.");
+
+        Assert.Equal(["Humedad", "Grietas"], analysis.GetVisitObservations());
+        Assert.Equal("Mancha visible en dormitorio.", analysis.VisitNotes);
+        Assert.Equal(opportunityScore, analysis.OpportunityScore);
+        Assert.Equal(protectionScore, analysis.ProtectionScore);
+    }
+
     private static PropertyAnalysis CreateAnalysis(
         decimal? monthlyExpenses = 95000,
         decimal priceUsd = 180000,

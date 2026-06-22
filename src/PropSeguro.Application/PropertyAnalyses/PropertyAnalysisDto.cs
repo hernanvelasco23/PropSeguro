@@ -26,6 +26,8 @@ public sealed record PropertyAnalysisDto(
     bool? IsCreditEligible,
     string PropertyCondition,
     string? Notes,
+    IReadOnlyCollection<string> VisitObservations,
+    string? VisitNotes,
     int OpportunityScore,
     int ProtectionScore,
     string InitialRiskLevel,
@@ -149,11 +151,14 @@ public sealed record PropertyDocumentDto(
     string AnalysisStatus,
     DateTime? AnalyzedAtUtc,
     string? AnalysisSummary,
+    bool UserConfirmedMatchesProperty,
+    DateTime? UserConfirmedMatchesPropertyAtUtc,
     ExpenseDocumentValidationDto? ExpenseValidation);
 
 public sealed record DocumentFindingDto(
     Guid Id,
     Guid PropertyDocumentId,
+    string Code,
     string Severity,
     string Category,
     string Title,
@@ -215,6 +220,8 @@ public static class PropertyAnalysisMapping
             analysis.IsCreditEligible,
             analysis.PropertyCondition.ToString(),
             analysis.Notes,
+            analysis.GetVisitObservations(),
+            analysis.VisitNotes,
             analysis.OpportunityScore,
             analysis.ProtectionScore,
             analysis.InitialRiskLevel.ToString(),
@@ -267,6 +274,8 @@ public static class PropertyAnalysisMapping
                     document.AnalysisStatus.ToString(),
                     document.AnalyzedAtUtc,
                     document.AnalysisSummary,
+                    document.UserConfirmedMatchesProperty,
+                    document.UserConfirmedMatchesPropertyAtUtc,
                     document.DocumentType == DocumentType.Expenses
                         ? ExpenseDocumentValidator.Validate(
                             analysis,
@@ -307,6 +316,7 @@ public static class PropertyAnalysisMapping
         return new DocumentFindingDto(
             finding.Id,
             finding.PropertyDocumentId,
+            finding.ToStableCode(),
             finding.Severity.ToString(),
             finding.Category.ToString(),
             finding.Title,
@@ -317,6 +327,28 @@ public static class PropertyAnalysisMapping
             finding.SuggestedNegotiationPoint,
             finding.MatchedText,
             finding.CreatedAtUtc);
+    }
+
+    public static string ToStableCode(this DocumentFinding finding)
+    {
+        return finding.Title switch
+        {
+            "Verificacion pendiente de unidad" => ExpenseDocumentValidator.ExpenseUnitMismatchCode,
+            "Las expensas podrian corresponder a otra unidad" => ExpenseDocumentValidator.ExpenseUnitMismatchCode,
+            "Las expensas del documento difieren del valor publicado" => ExpenseDocumentValidator.ExpenseValueMismatchCode,
+            "Las expensas del documento no coinciden con la publicacion" => ExpenseDocumentValidator.ExpenseValueMismatchCode,
+            "Expensas altas frente al benchmark de la zona" => "EXPENSE_ABOVE_BENCHMARK",
+            "Expensas extraordinarias detectadas" => "EXPENSE_EXTRAORDINARY_DETECTED",
+            "Humedad o filtracion detectada" => "EXPENSE_HUMIDITY_DETECTED",
+            "Morosidad o deuda detectada" => "EXPENSE_DEBT_DETECTED",
+            "Referencia a ascensor" => "EXPENSE_ELEVATOR_REFERENCE",
+            "Obras o reparaciones mencionadas" => "EXPENSE_WORKS_DETECTED",
+            "Costos de personal del edificio" => "EXPENSE_STAFF_COSTS_DETECTED",
+            "No se identifico la unidad en las expensas" => "EXPENSE_UNIT_NOT_DETECTED",
+            "No se pudo validar la unidad de las expensas" => "EXPENSE_PROPERTY_UNIT_MISSING",
+            "No se pudo verificar el valor real de expensas" => "EXPENSE_VALUE_NOT_DETECTED",
+            _ => BuildStableCode(finding)
+        };
     }
 
     public static NegotiationAnalysisDto ToNegotiationAnalysisDto(this PropertyAnalysis analysis)
@@ -427,5 +459,22 @@ public static class PropertyAnalysisMapping
         }
 
         return $"Se detectaron {findings.Count} senal(es) en expensas para preguntar o negociar antes de avanzar.";
+    }
+
+    private static string BuildStableCode(DocumentFinding finding)
+    {
+        var text = string.Concat(finding.Title
+            .Normalize(System.Text.NormalizationForm.FormD)
+            .Where(character => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(character) != System.Globalization.UnicodeCategory.NonSpacingMark))
+            .ToUpperInvariant();
+        var chars = text.Select(character => char.IsLetterOrDigit(character) ? character : '_').ToArray();
+        var compact = new string(chars);
+
+        while (compact.Contains("__", StringComparison.Ordinal))
+        {
+            compact = compact.Replace("__", "_", StringComparison.Ordinal);
+        }
+
+        return compact.Trim('_');
     }
 }

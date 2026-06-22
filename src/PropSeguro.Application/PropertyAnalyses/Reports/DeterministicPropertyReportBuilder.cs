@@ -37,17 +37,19 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
             .Where(item => item.PropertyAnalysisId == propertyAnalysisId)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+        var reportFindings = DistinctFindingsByStableCode(documentFindings);
 
         analysis.RecalculateOpportunityScore();
-        analysis.RecalculateProtectionScore(documentFindings);
+        analysis.RecalculateProtectionScore(reportFindings);
 
-        var recommendation = DetermineRecommendation(analysis, documentFindings);
-        var reservationSection = BuildReservationSection(analysis, documentFindings);
-        var expensesSection = BuildExpensesSection(analysis, documentFindings);
-        var reportStatus = DetermineReportStatus(analysis, documentFindings);
+        var recommendation = DetermineRecommendation(analysis, reportFindings);
+        var reservationSection = BuildReservationSection(analysis, reportFindings);
+        var expensesSection = BuildExpensesSection(analysis, reportFindings);
+        var reportStatus = DetermineReportStatus(analysis, reportFindings);
         var generatedAtUtc = DateTime.UtcNow;
-        var suggestedQuestions = Unique(documentFindings.Select(item => item.SuggestedQuestion)).ToArray();
-        var suggestedNegotiationPoints = Unique(documentFindings.Select(item => item.SuggestedNegotiationPoint ?? item.SuggestedChange)).ToArray();
+        var suggestedQuestions = Unique(reportFindings.Select(item => item.SuggestedQuestion)).ToArray();
+        var suggestedNegotiationPoints = Unique(reportFindings.Select(item => item.SuggestedNegotiationPoint ?? item.SuggestedChange)).ToArray();
+        var negotiationOpportunities = BuildNegotiationOpportunities(analysis, reportFindings, expensesSection);
 
         return new PropertyReportDto(
             BuildPropertySummary(analysis),
@@ -55,28 +57,33 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
             ReportStatusLabel(reportStatus),
             BuildCoverSection(analysis, reportStatus, generatedAtUtc),
             BuildExecutiveSummary(analysis, recommendation),
-            BuildExecutiveConclusion(analysis, recommendation, documentFindings),
+            BuildExecutiveConclusion(analysis, recommendation, reportFindings),
             recommendation.ToString(),
             RecommendationLabel(recommendation),
             RecommendationExplanation(recommendation),
+            BuildIdentifiedRisks(analysis, reportFindings, expensesSection),
+            BuildDetectedStrengths(analysis, reportFindings, reservationSection, expensesSection),
+            BuildZoneStrengths(analysis),
+            BuildNegotiationLevers(negotiationOpportunities),
             BuildOpportunitySection(analysis),
-            BuildProtectionSection(analysis, documentFindings),
-            BuildNegotiationSection(analysis),
+            BuildProtectionSection(analysis, reportFindings),
+            BuildNegotiationSection(analysis, reportFindings, expensesSection),
             BuildDocumentsSection(analysis),
             reservationSection,
             expensesSection,
-            BuildFindingsSection(documentFindings),
-            BuildWhatThisMeansForYou(analysis, documentFindings, reservationSection, expensesSection),
-            BuildConditionsToAdvance(analysis, documentFindings, reservationSection, expensesSection),
-            BuildMoneyRisks(analysis, documentFindings),
-            BuildNegotiationArguments(analysis, documentFindings, expensesSection),
-            BuildQuestionsForSellerOrAgent(analysis, documentFindings, expensesSection),
-            BuildQuestionsForNotaryOrLawyer(documentFindings, reservationSection),
+            BuildFindingsSection(reportFindings),
+            BuildWhatThisMeansForYou(analysis, reportFindings, reservationSection, expensesSection),
+            BuildConditionsToAdvance(analysis, reportFindings, reservationSection, expensesSection),
+            BuildMoneyRisks(analysis, reportFindings),
+            negotiationOpportunities,
+            BuildNegotiationArguments(analysis, reportFindings, expensesSection),
+            BuildQuestionsForSellerOrAgent(analysis, reportFindings, expensesSection),
+            BuildQuestionsForNotaryOrLawyer(reportFindings, reservationSection),
             BuildReviewedDocuments(analysis),
             BuildPendingDocuments(analysis),
             suggestedQuestions,
             suggestedNegotiationPoints,
-            BuildNextSteps(analysis, documentFindings, reservationSection, expensesSection),
+            BuildNextSteps(analysis, reportFindings, reservationSection, expensesSection),
             DisclaimerText,
             generatedAtUtc);
     }
@@ -150,7 +157,10 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
                     : "La documentacion cargada no muestra alertas graves con las reglas actuales.");
     }
 
-    private static PropertyReportNegotiationSectionDto BuildNegotiationSection(PropertyAnalysis analysis)
+    private static PropertyReportNegotiationSectionDto BuildNegotiationSection(
+        PropertyAnalysis analysis,
+        IReadOnlyCollection<DocumentFinding> findings,
+        PropertyReportExpensesSectionDto expensesSection)
     {
         return new PropertyReportNegotiationSectionDto(
             analysis.PriceUsd,
@@ -162,7 +172,8 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
             analysis.NegotiationMarginPercent,
             analysis.MarketPosition.ToString(),
             MarketPositionLabel(analysis.MarketPosition),
-            analysis.NegotiationExplanation);
+            analysis.NegotiationExplanation,
+            BuildSuggestedNegotiationStrategy(analysis, findings, expensesSection));
     }
 
     private static PropertyReportDocumentsSectionDto BuildDocumentsSection(PropertyAnalysis analysis)
@@ -200,9 +211,9 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
             return EmptyDocumentTypeSection("Reserva no analizada todavia.");
         }
 
-        var documentFindings = findings
+        var documentFindings = DistinctFindingsByStableCode(findings
             .Where(item => item.PropertyDocumentId == document.Id)
-            .OrderByDescending(item => item.Severity)
+            .OrderByDescending(item => item.Severity))
             .ToArray();
 
         return new PropertyReportDocumentTypeSectionDto(
@@ -231,17 +242,19 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
             return EmptyExpensesSection("Expensas no analizadas todavia.", analysis, expenseBenchmark);
         }
 
-        var documentFindings = findings
-            .Where(item => item.PropertyDocumentId == document.Id)
-            .OrderByDescending(item => item.Severity)
-            .ToArray();
         var expenseValidation = ExpenseDocumentValidator.Validate(analysis, document, document.EditedText ?? document.ExtractedText);
+        var documentFindings = DistinctFindingsByStableCode(findings
+            .Where(item => item.PropertyDocumentId == document.Id)
+            .Concat(expenseValidation.Findings)
+            .OrderByDescending(item => item.Severity))
+            .ToArray();
         var expenseIntelligence = analysis.ToExpenseIntelligenceAnalysisDto(findings);
 
         return new PropertyReportExpensesSectionDto(
             true,
             document.AnalysisStatus == DocumentAnalysisStatus.Completed,
             document.AnalysisStatus == DocumentAnalysisStatus.Completed ? "Expensas analizadas." : "Expensas cargadas, pendientes de analisis.",
+            "Documento de expensas cargado",
             expenseIntelligence?.BuildingHealthScore,
             expenseIntelligence?.Classification,
             expenseValidation.ToDto(),
@@ -251,7 +264,10 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
             expenseBenchmark.MonthlyExpensesPerSquareMeter,
             expenseBenchmark.BenchmarkMonthlyExpensesPerSquareMeter,
             expenseBenchmark.Comparison,
+            BuildPublishedVsDocumentStatus(analysis.MonthlyExpenses, expenseValidation.Extraction.DetectedExpenseAmount),
             expenseValidation.Label,
+            document.UserConfirmedMatchesProperty,
+            document.UserConfirmedMatchesPropertyAtUtc,
             documentFindings.Take(6).Select(item => item.ToDto()).ToArray(),
             Unique(documentFindings.Select(item => item.SuggestedQuestion)).ToArray(),
             Unique(documentFindings.Select(item => item.SuggestedNegotiationPoint ?? item.SuggestedChange)).ToArray());
@@ -291,14 +307,13 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
         }
 
         if (findings.Any(item => item.Severity == FindingSeverity.Critical) ||
-            analysis.ProtectionScore < 30 ||
-            findings.Any(item => item.Title == "Las expensas podrian corresponder a otra unidad"))
+            analysis.ProtectionScore < 30)
         {
-            return OverallRecommendation.Avoid;
+            return OverallRecommendation.ProfessionalReview;
         }
 
         if (analysis.MarketPosition == MarketPosition.Overpriced ||
-            findings.Any(item => item.Title == "Las expensas del documento no coinciden con la publicacion") ||
+            findings.Any(item => IsExpenseValueMismatch(item)) ||
             findings.Any(item => item.Category == FindingCategory.Financial && item.Severity == FindingSeverity.High))
         {
             return OverallRecommendation.Renegotiate;
@@ -339,8 +354,7 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
         var hasBlockingInconsistency = findings.Any(item =>
             item.Severity == FindingSeverity.Critical ||
             item.Severity == FindingSeverity.High ||
-            item.Title == "Las expensas del documento no coinciden con la publicacion" ||
-            item.Title == "Las expensas podrian corresponder a otra unidad") ||
+            IsExpenseValueMismatch(item)) ||
             analysis.Documents.Any(item =>
                 item.DocumentType == DocumentType.ReservationAgreement &&
                 item.AnalysisStatus == DocumentAnalysisStatus.Completed &&
@@ -376,15 +390,15 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
         return recommendation switch
         {
             OverallRecommendation.Advance =>
-                "Seguiría avanzando. La propiedad muestra una oportunidad razonable y la documentación analizada no presenta alertas graves con las reglas actuales.",
+                "Avanzar. La propiedad muestra una oportunidad razonable y la documentación analizada no presenta alertas graves con las reglas actuales.",
             OverallRecommendation.AdvanceWithCaution =>
-                "Avanzaría con cautela. La propiedad puede ser interesante, pero todavía conviene resolver algunos puntos documentales antes de comprometer dinero.",
+                "Avanzar negociando. La propiedad puede ser interesante, pero todavía conviene resolver algunos puntos documentales antes de comprometer dinero.",
             OverallRecommendation.WaitForDocuments =>
-                "Esperaría documentación. Antes de reservar, conviene completar los documentos clave y validar que no existan riesgos que cambien la decisión.",
+                "Resolver pendientes antes de avanzar. Antes de reservar, conviene completar los documentos clave y validar que no existan riesgos que cambien la decisión.",
             OverallRecommendation.Renegotiate =>
-                "Renegociaría antes de avanzar. Hay señales de precio, expensas o riesgos financieros que pueden usarse para pedir mejores condiciones.",
-            OverallRecommendation.Avoid =>
-                "No avanzaría todavía. El análisis detectó riesgos relevantes o inconsistencias que deberían resolverse antes de firmar o transferir dinero.",
+                "Avanzar negociando. Hay señales de precio, expensas o riesgos financieros que pueden usarse para pedir mejores condiciones.",
+            OverallRecommendation.ProfessionalReview =>
+                "Hay hallazgos relevantes. Vale la pena revisarlos con un profesional y pedir aclaraciones concretas antes de comprometer dinero.",
             _ when findings.Any(item => item.Severity is FindingSeverity.High or FindingSeverity.Critical) =>
                 "Requiere revisión. Hay alertas relevantes que conviene conversar con la inmobiliaria y revisar con un profesional antes de seguir.",
             _ when analysis.OpportunityScore >= 65 =>
@@ -407,6 +421,122 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
         }
 
         return "Faltan datos o hay senales iniciales que reducen la conveniencia de avanzar.";
+    }
+
+    private static IReadOnlyCollection<string> BuildIdentifiedRisks(
+        PropertyAnalysis analysis,
+        IReadOnlyCollection<DocumentFinding> findings,
+        PropertyReportExpensesSectionDto expensesSection)
+    {
+        var risks = new List<string>();
+
+        risks.AddRange(findings
+            .Where(item => item.Severity is FindingSeverity.Critical or FindingSeverity.High or FindingSeverity.Medium)
+            .Select(BuildRiskSummary));
+
+        if (analysis.GetVisitObservations().Any(IsStrongVisitObservation))
+        {
+            risks.Add("Observaciones relevantes de visita: pueden anticipar reparaciones, costos o necesidad de revision profesional antes de ofertar.");
+        }
+
+        if (expensesSection.ExpenseBenchmarkComparison == "Muy por encima del benchmark de expensas")
+        {
+            risks.Add("Expensas por m2 muy por encima del benchmark: pueden aumentar el costo mensual real frente a alternativas comparables.");
+        }
+
+        return risks
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyCollection<string> BuildDetectedStrengths(
+        PropertyAnalysis analysis,
+        IReadOnlyCollection<DocumentFinding> findings,
+        PropertyReportDocumentTypeSectionDto reservationSection,
+        PropertyReportExpensesSectionDto expensesSection)
+    {
+        var strengths = new List<string>();
+
+        if (analysis.MarketPosition is MarketPosition.Cheap or MarketPosition.Fair)
+        {
+            strengths.Add("Precio competitivo o alineado al benchmark de la zona.");
+        }
+
+        if (expensesSection.ExpenseBenchmarkComparison is "Por debajo del benchmark de expensas" or "En linea con el benchmark de expensas")
+        {
+            strengths.Add("Expensas dentro de parametros razonables para la zona.");
+        }
+
+        if (expensesSection.BuildingHealthScore >= 70)
+        {
+            strengths.Add($"Salud del edificio {expensesSection.BuildingHealthScore} - {expensesSection.BuildingHealthClassification ?? "Buena"}.");
+        }
+
+        if (expensesSection.IsAnalyzed && !HasExpenseOperatingSignals(expensesSection.KeyFindings))
+        {
+            strengths.Add("Documento de expensas sin senales de deuda, morosidad u obras relevantes.");
+        }
+
+        if (reservationSection.IsAnalyzed && !findings.Any(item => item.Category == FindingCategory.Legal && item.Severity == FindingSeverity.Critical))
+        {
+            strengths.Add("Sin hallazgos legales criticos detectados en la documentacion analizada.");
+        }
+
+        if (reservationSection.IsAnalyzed && reservationSection.KeyFindings.Count == 0)
+        {
+            strengths.Add("Reserva sin clausulas relevantes detectadas por las reglas actuales.");
+        }
+
+        return strengths
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(4)
+            .ToArray();
+    }
+
+    private static IReadOnlyCollection<string> BuildZoneStrengths(PropertyAnalysis analysis)
+    {
+        var benchmark = NeighborhoodBenchmark.Find(analysis.Neighborhood);
+        if (benchmark is null)
+        {
+            return [];
+        }
+
+        var strengths = new List<string>();
+        var neighborhood = benchmark.Neighborhood;
+
+        if (benchmark.InvestmentDemandLevel == DemandLevel.High || benchmark.LivingDemandLevel == DemandLevel.High)
+        {
+            strengths.Add($"{neighborhood} presenta demanda inmobiliaria alta para compra residencial o inversion.");
+        }
+
+        strengths.Add($"{neighborhood} es una zona consolidada, con oferta comparable y servicios urbanos establecidos.");
+
+        if (benchmark.InvestmentDemandLevel == DemandLevel.High)
+        {
+            strengths.Add("La demanda de alquiler favorece analizar la propiedad como activo de renta.");
+        }
+
+        if (benchmark.LivingDemandLevel == DemandLevel.High)
+        {
+            strengths.Add("La demanda para vivienda propia puede favorecer liquidez futura y reventa.");
+        }
+
+        return strengths
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(4)
+            .ToArray();
+    }
+
+    private static IReadOnlyCollection<string> BuildNegotiationLevers(
+        IReadOnlyCollection<PropertyReportNegotiationOpportunityDto> opportunities)
+    {
+        return opportunities
+            .Select(item => $"{item.Title}: {item.SuggestedAction}")
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static string BuildDocumentConfidenceSummary(PropertyAnalysis analysis)
@@ -432,7 +562,7 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
     {
         var items = new List<string>();
 
-        if (expensesSection.DocumentConfidence?.Classification is "Mismatch")
+        if (expensesSection.DocumentConfidence?.Classification is ExpenseDocumentValidator.ValueMismatchClassification)
         {
             items.Add("Podrías estar evaluando la propiedad con un valor de expensas incorrecto.");
         }
@@ -487,7 +617,7 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
     {
         var conditions = new List<string>();
 
-        if (expensesSection.DocumentConfidence?.Classification is "Mismatch" or "PartiallyValidated" or "NotValidated")
+        if (RequiresExpenseUnitConfirmation(expensesSection.DocumentConfidence?.Classification))
         {
             conditions.Add("Confirmar que las expensas corresponden a la unidad publicada.");
         }
@@ -577,32 +707,238 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
     {
         var arguments = new List<string>();
 
-        if (expensesSection.DocumentConfidence?.Classification == "Mismatch")
+        if (analysis.MarketPosition is MarketPosition.Expensive or MarketPosition.Overpriced)
         {
-            arguments.Add("Expensas superiores o distintas a las publicadas.");
+            arguments.Add("Precio por m2 por encima del valor justo estimado.");
         }
 
-        if (findings.Any(item => item.Title.Contains("extraordinarias", StringComparison.OrdinalIgnoreCase)))
+        if (analysis.GetVisitObservations().Any(IsStrongVisitObservation))
         {
-            arguments.Add("Expensas extraordinarias detectadas o pendientes de aclaración.");
+            arguments.Add("Observaciones de visita que conviene validar antes de mejorar la oferta.");
+        }
+
+        if (RequiresExpenseUnitConfirmation(expensesSection.DocumentConfidence?.Classification) ||
+            expensesSection.DocumentConfidence?.Classification == ExpenseDocumentValidator.ValueMismatchClassification)
+        {
+            arguments.Add("Validaciones pendientes sobre expensas o documentacion.");
         }
 
         if (analysis.ChecklistItems.Any(item => item.IsRequired && !item.IsProvided))
         {
-            arguments.Add("Falta validación documental completa.");
+            arguments.Add("Documentacion pendiente para cerrar la validacion.");
+        }
+
+        return WithFallback(arguments, "Todavía no hay argumentos fuertes de negociación detectados con la información cargada.");
+    }
+
+    private static IReadOnlyCollection<PropertyReportNegotiationOpportunityDto> BuildNegotiationOpportunities(
+        PropertyAnalysis analysis,
+        IReadOnlyCollection<DocumentFinding> findings,
+        PropertyReportExpensesSectionDto expensesSection)
+    {
+        var opportunities = new List<PropertyReportNegotiationOpportunityDto>();
+        var observations = analysis.GetVisitObservations().ToArray();
+        var hasHumidityObservation = observations.Any(IsHumidityObservation);
+        var hasReservationHumidityFinding = findings.Any(finding =>
+            IsReservationFinding(analysis, finding) &&
+            MentionsHumidity(finding));
+
+        if (hasHumidityObservation && hasReservationHumidityFinding)
+        {
+            opportunities.Add(new PropertyReportNegotiationOpportunityDto(
+                "Humedad observada + mencionada en la reserva",
+                "El comprador observo humedad durante la visita y la reserva tambien contiene una clausula relacionada. Esto refuerza la necesidad de pedir aclaraciones, documentacion adicional o una mejora en las condiciones de la operacion.",
+                "Alto",
+                "Pedir aclaracion por escrito, solicitar revision profesional y usarlo como argumento de renegociacion."));
+        }
+
+        foreach (var observation in observations)
+        {
+            var opportunity = BuildVisitObservationOpportunity(observation);
+            if (opportunity is not null &&
+                !(IsHumidityObservation(observation) && hasReservationHumidityFinding))
+            {
+                opportunities.Add(opportunity);
+            }
         }
 
         if (analysis.MarketPosition is MarketPosition.Expensive or MarketPosition.Overpriced)
         {
-            arguments.Add("Precio por m² por encima del promedio estimado para la zona.");
+            opportunities.Add(new PropertyReportNegotiationOpportunityDto(
+                "Precio publicado por encima del valor justo estimado",
+                "El precio publicado queda por encima del rango estimado para la zona y los metros cargados. Conviene separar el valor emocional del inmueble del valor comparable de mercado.",
+                analysis.MarketPosition == MarketPosition.Overpriced ? "Alto" : "Medio",
+                "Usar el rango de valor justo y el precio por m2 como base para ajustar la oferta."));
         }
 
-        if (findings.Any(item => item.Category == FindingCategory.Financial || item.Category == FindingCategory.Documentation))
+        if (expensesSection.ExpenseBenchmarkComparison == "Muy por encima del benchmark de expensas")
         {
-            arguments.Add("Riesgos del edificio o de la documentación pendientes de aclaración.");
+            opportunities.Add(new PropertyReportNegotiationOpportunityDto(
+                "Expensas altas frente al benchmark de la zona",
+                "Las expensas por m2 cargadas superan ampliamente el benchmark mensual de la zona. Esto puede afectar el costo real de sostener la propiedad.",
+                "Medio",
+                "Pedir liquidacion detallada, extraordinarias y deudas del consorcio antes de ofertar."));
         }
 
-        return WithFallback(arguments, "Todavía no hay argumentos fuertes de negociación detectados con la información cargada.");
+        foreach (var finding in findings.Where(IsNegotiationUsefulFinding))
+        {
+            opportunities.Add(new PropertyReportNegotiationOpportunityDto(
+                finding.Title,
+                finding.BuyerImpact ?? finding.Description,
+                ImpactLabel(finding.Severity),
+                finding.SuggestedNegotiationPoint ?? finding.SuggestedChange ?? "Pedir aclaracion por escrito antes de avanzar."));
+        }
+
+        return opportunities
+            .Where(item => !string.IsNullOrWhiteSpace(item.Title))
+            .GroupBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
+    private static string BuildSuggestedNegotiationStrategy(
+        PropertyAnalysis analysis,
+        IReadOnlyCollection<DocumentFinding> findings,
+        PropertyReportExpensesSectionDto expensesSection)
+    {
+        var observations = analysis.GetVisitObservations().ToArray();
+        var hasStrongObservation = observations.Any(IsStrongVisitObservation);
+        var hasMinorObservation = observations.Length > 0 && !hasStrongObservation;
+        var hasHighPrice = analysis.MarketPosition is MarketPosition.Expensive or MarketPosition.Overpriced;
+        var hasCriticalDocumentRisk = findings.Any(item => item.Severity == FindingSeverity.Critical);
+        var hasRelevantDocumentSignal = findings.Any(IsNegotiationUsefulFinding);
+        var hasHighExpenses = expensesSection.ExpenseBenchmarkComparison == "Muy por encima del benchmark de expensas";
+
+        if (hasCriticalDocumentRisk)
+        {
+            return "Antes de firmar conviene aclarar los riesgos documentales criticos y pedir respaldo por escrito. La negociacion deberia priorizar condiciones de salida, documentacion pendiente y proteccion de la reserva.";
+        }
+
+        if (hasStrongObservation && hasHighPrice)
+        {
+            return "La estrategia sugerida es una renegociacion fuerte: combinar lo observado en la visita con el precio por encima del valor justo estimado para justificar una oferta mas prudente o mejores condiciones antes de avanzar.";
+        }
+
+        if (hasStrongObservation || hasRelevantDocumentSignal || hasHighExpenses)
+        {
+            return "La estrategia sugerida es negociar con firmeza pero sin exagerar: pedir aclaraciones, documentacion de respaldo y usar las senales detectadas como argumentos concretos para mejorar precio o condiciones.";
+        }
+
+        if (hasMinorObservation || hasHighPrice)
+        {
+            return "La estrategia sugerida es una negociacion moderada: usar las observaciones cargadas y el rango de valor justo como referencia para ordenar la oferta y evitar pagar de mas.";
+        }
+
+        return "Con la informacion cargada, la estrategia sugerida es mantener una oferta alineada al valor justo estimado y pedir confirmaciones por escrito antes de asumir compromisos.";
+    }
+
+    private static PropertyReportNegotiationOpportunityDto? BuildVisitObservationOpportunity(string observation)
+    {
+        return observation switch
+        {
+            "Humedad" => new PropertyReportNegotiationOpportunityDto(
+                "Humedad observada durante la visita",
+                "La humedad observada puede justificar solicitar una revision profesional y usar ese punto como argumento para renegociar el precio o pedir reparaciones antes de avanzar.",
+                "Alto",
+                "Solicitar revision profesional y usarlo como argumento de renegociacion."),
+            "Grietas" => new PropertyReportNegotiationOpportunityDto(
+                "Grietas observadas durante la visita",
+                "Las grietas observadas conviene aclararlas antes de firmar, especialmente si pueden estar vinculadas a mantenimiento, estructura o filtraciones.",
+                "Alto",
+                "Pedir evaluacion profesional o explicacion documentada antes de mejorar la oferta."),
+            "Olor a humedad" => new PropertyReportNegotiationOpportunityDto(
+                "Olor a humedad durante la visita",
+                "El olor a humedad puede anticipar filtraciones o problemas de ventilacion que no siempre aparecen en las fotos o en la publicacion.",
+                "Medio",
+                "Solicitar una segunda visita y consultar por antecedentes de humedad o arreglos recientes."),
+            "Problemas electricos" => new PropertyReportNegotiationOpportunityDto(
+                "Problemas electricos observados",
+                "Los problemas electricos observados pueden requerir revision tecnica antes de avanzar y sirven como argumento para pedir aclaraciones.",
+                "Alto",
+                "Pedir revision de instalacion electrica y dejar constancia antes de firmar."),
+            "Problemas de agua" => new PropertyReportNegotiationOpportunityDto(
+                "Problemas de agua observados",
+                "Los problemas de agua pueden impactar el uso diario de la propiedad y conviene aclarar si son puntuales o recurrentes.",
+                "Alto",
+                "Pedir explicacion por escrito y revisar antecedentes de reclamos o reparaciones."),
+            "Falta de ventilacion" => new PropertyReportNegotiationOpportunityDto(
+                "Falta de ventilacion",
+                "La falta de ventilacion puede afectar confort, humedad y mantenimiento futuro de la unidad.",
+                "Medio",
+                "Usarlo como argumento para negociar condiciones o pedir una revision mas detallada."),
+            "Falta de luz natural" => new PropertyReportNegotiationOpportunityDto(
+                "Falta de luz natural",
+                "La falta de luz natural puede afectar el valor percibido y la comparacion con propiedades similares.",
+                "Bajo",
+                "Considerarlo al definir la oferta frente a comparables de la zona."),
+            "Ruidos" => new PropertyReportNegotiationOpportunityDto(
+                "Ruidos observados durante la visita",
+                "Los ruidos pueden afectar el uso cotidiano y conviene verificarlos en distintos horarios antes de comprometer dinero.",
+                "Medio",
+                "Pedir otra visita en horario diferente y usarlo como punto de negociacion si se confirma."),
+            "Ascensor deficiente" => new PropertyReportNegotiationOpportunityDto(
+                "Ascensor deficiente",
+                "Un ascensor deficiente puede anticipar gastos del consorcio o incomodidades de uso, especialmente en pisos altos.",
+                "Medio",
+                "Pedir informacion sobre mantenimiento, reparaciones pendientes y expensas extraordinarias."),
+            "Fachada deteriorada" => new PropertyReportNegotiationOpportunityDto(
+                "Fachada deteriorada",
+                "La fachada deteriorada puede indicar mantenimiento pendiente del edificio y posibles gastos futuros del consorcio.",
+                "Medio",
+                "Pedir actas, presupuesto de obras y detalle de extraordinarias antes de ofertar."),
+            "Otro" => new PropertyReportNegotiationOpportunityDto(
+                "Observacion relevante de la visita",
+                "La observacion cargada por el comprador puede servir para pedir aclaraciones o ajustar condiciones antes de avanzar.",
+                "Medio",
+                "Documentar la observacion y pedir respuesta por escrito antes de firmar."),
+            _ => null
+        };
+    }
+
+    private static bool IsStrongVisitObservation(string observation)
+    {
+        return observation is "Humedad" or "Grietas" or "Olor a humedad" or "Problemas electricos" or "Problemas de agua";
+    }
+
+    private static bool IsHumidityObservation(string observation)
+    {
+        return observation is "Humedad" or "Olor a humedad";
+    }
+
+    private static bool IsReservationFinding(PropertyAnalysis analysis, DocumentFinding finding)
+    {
+        return analysis.Documents.FirstOrDefault(item => item.Id == finding.PropertyDocumentId)?.DocumentType == DocumentType.ReservationAgreement;
+    }
+
+    private static bool MentionsHumidity(DocumentFinding finding)
+    {
+        var text = $"{finding.Title} {finding.Description} {finding.BuyerImpact}".ToLowerInvariant();
+        return text.Contains("humedad") || text.Contains("filtracion") || text.Contains("filtraci");
+    }
+
+    private static bool IsNegotiationUsefulFinding(DocumentFinding finding)
+    {
+        if (!string.IsNullOrWhiteSpace(finding.SuggestedNegotiationPoint))
+        {
+            return true;
+        }
+
+        if (MentionsHumidity(finding))
+        {
+            return true;
+        }
+
+        return finding.Category is FindingCategory.Building or FindingCategory.Financial or FindingCategory.Legal or FindingCategory.Negotiation;
+    }
+
+    private static string ImpactLabel(FindingSeverity severity)
+    {
+        return severity switch
+        {
+            FindingSeverity.Critical or FindingSeverity.High => "Alto",
+            FindingSeverity.Medium => "Medio",
+            _ => "Bajo"
+        };
     }
 
     private static IReadOnlyCollection<string> BuildQuestionsForSellerOrAgent(
@@ -613,7 +949,7 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
         var questions = new List<string>();
         questions.AddRange(Unique(findings.Select(item => item.SuggestedQuestion)));
 
-        if (expensesSection.DocumentConfidence?.Classification is "Mismatch" or "PartiallyValidated" or "NotValidated")
+        if (RequiresExpenseUnitConfirmation(expensesSection.DocumentConfidence?.Classification))
         {
             questions.Add("¿Podés confirmar por escrito que estas expensas corresponden a la unidad publicada?");
         }
@@ -702,7 +1038,7 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
             steps.Add("Solicitar informe de dominio.");
         }
 
-        if (expensesSection.DocumentConfidence?.Classification is "Mismatch" or "NotValidated" or "PartiallyValidated")
+        if (RequiresExpenseUnitConfirmation(expensesSection.DocumentConfidence?.Classification))
         {
             steps.Add("Confirmar que las expensas corresponden a la unidad publicada.");
         }
@@ -870,10 +1206,15 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
         PropertyAnalysis analysis,
         ExpenseBenchmarkAssessment expenseBenchmark)
     {
+        var hasPreliminaryExpenseData = analysis.MonthlyExpenses.HasValue ||
+            analysis.TotalSquareMeters.HasValue ||
+            expenseBenchmark.BenchmarkMonthlyExpensesPerSquareMeter.HasValue;
+
         return new PropertyReportExpensesSectionDto(
             false,
             false,
-            status,
+            hasPreliminaryExpenseData ? BuildPreliminaryExpenseStatus(expenseBenchmark) : status,
+            hasPreliminaryExpenseData ? "Preliminar - datos de publicacion" : "Sin datos de expensas",
             null,
             null,
             null,
@@ -883,6 +1224,9 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
             expenseBenchmark.MonthlyExpensesPerSquareMeter,
             expenseBenchmark.BenchmarkMonthlyExpensesPerSquareMeter,
             expenseBenchmark.Comparison,
+            "Sin documento de expensas cargado",
+            null,
+            false,
             null,
             [],
             [],
@@ -903,15 +1247,123 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
             .Distinct(StringComparer.OrdinalIgnoreCase);
     }
 
+    private static IReadOnlyCollection<DocumentFinding> DistinctFindingsByStableCode(IEnumerable<DocumentFinding> findings)
+    {
+        return findings
+            .GroupBy(finding => finding.ToStableCode(), StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderByDescending(finding => finding.Severity)
+                .ThenBy(finding => finding.CreatedAtUtc)
+                .First())
+            .OrderByDescending(finding => finding.Severity)
+            .ThenBy(finding => finding.CreatedAtUtc)
+            .ToArray();
+    }
+
+    private static string BuildPublishedVsDocumentStatus(decimal? publishedMonthlyExpenses, decimal? detectedExpenseAmount)
+    {
+        if (!publishedMonthlyExpenses.HasValue && !detectedExpenseAmount.HasValue)
+        {
+            return "Sin valor publicado ni valor detectado";
+        }
+
+        if (!detectedExpenseAmount.HasValue)
+        {
+            return "Sin valor detectado en documento";
+        }
+
+        if (!publishedMonthlyExpenses.HasValue)
+        {
+            return "Valor detectado en documento, sin valor publicado para comparar";
+        }
+
+        if (publishedMonthlyExpenses.Value <= 0)
+        {
+            return "Valor publicado no valido para comparar";
+        }
+
+        var difference = Math.Abs(publishedMonthlyExpenses.Value - detectedExpenseAmount.Value) / publishedMonthlyExpenses.Value;
+
+        return difference switch
+        {
+            <= 0.10m => "Documento alineado con el valor publicado",
+            <= 0.25m => "Diferencia moderada entre publicacion y documento",
+            _ => "Diferencia significativa entre publicacion y documento"
+        };
+    }
+
+    private static bool RequiresExpenseUnitConfirmation(string? classification)
+    {
+        return classification is ExpenseDocumentValidator.UnitVerificationPendingClassification or "PartiallyValidated" or "NotValidated";
+    }
+
+    private static bool IsExpenseValueMismatch(DocumentFinding finding)
+    {
+        return finding.ToStableCode() == ExpenseDocumentValidator.ExpenseValueMismatchCode;
+    }
+
+    private static string BuildRiskSummary(DocumentFinding finding)
+    {
+        var why = finding.ToStableCode() switch
+        {
+            ExpenseDocumentValidator.ExpenseUnitMismatchCode =>
+                "si el documento no corresponde a la unidad, el analisis de costos puede no representar la propiedad evaluada.",
+            ExpenseDocumentValidator.ExpenseValueMismatchCode =>
+                "si el monto real difiere del publicado, el costo mensual usado para decidir puede estar desactualizado.",
+            "EXPENSE_DEBT_DETECTED" =>
+                "puede anticipar deuda de la unidad o problemas de cobrabilidad del consorcio.",
+            "EXPENSE_WORKS_DETECTED" =>
+                "puede implicar cuotas, aumentos o gastos futuros del edificio.",
+            "EXPENSE_ELEVATOR_REFERENCE" =>
+                "puede anticipar mantenimiento o reparaciones relevantes del consorcio.",
+            "EXPENSE_HUMIDITY_DETECTED" =>
+                "puede implicar reparaciones, filtraciones recurrentes o necesidad de revision profesional.",
+            _ => finding.BuyerImpact ?? finding.Description
+        };
+
+        return $"{finding.Title}: {why}";
+    }
+
+    private static bool HasExpenseOperatingSignals(IReadOnlyCollection<DocumentFindingDto> findings)
+    {
+        var signalCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "EXPENSE_DEBT_DETECTED",
+            "EXPENSE_WORKS_DETECTED",
+            "EXPENSE_EXTRAORDINARY_DETECTED",
+            "EXPENSE_HUMIDITY_DETECTED",
+            "EXPENSE_ELEVATOR_REFERENCE",
+            "EXPENSE_STAFF_COSTS_DETECTED"
+        };
+
+        return findings.Any(finding => signalCodes.Contains(finding.Code));
+    }
+
+    private static string BuildPreliminaryExpenseStatus(ExpenseBenchmarkAssessment expenseBenchmark)
+    {
+        return expenseBenchmark.Comparison switch
+        {
+            "Por debajo del benchmark de expensas" =>
+                "Con los datos de la publicacion, las expensas parecen bajas para la zona y superficie.",
+            "En linea con el benchmark de expensas" =>
+                "Con los datos de la publicacion, las expensas parecen razonables para la zona y superficie.",
+            "Por encima del benchmark de expensas" =>
+                "Con los datos de la publicacion, las expensas parecen algo altas para la zona y superficie.",
+            "Muy por encima del benchmark de expensas" =>
+                "Con los datos de la publicacion, las expensas parecen altas para la zona y superficie.",
+            _ => "Analisis preliminar de expensas basado en los datos cargados."
+        };
+    }
+
     private static string RecommendationLabel(OverallRecommendation recommendation)
     {
         return recommendation switch
         {
-            OverallRecommendation.Advance => "Seguiría avanzando",
-            OverallRecommendation.AdvanceWithCaution => "Avanzaría con cautela",
-            OverallRecommendation.WaitForDocuments => "Esperaría documentación",
-            OverallRecommendation.Renegotiate => "Renegociaría",
-            OverallRecommendation.Avoid => "No avanzaría",
+            OverallRecommendation.Advance => "Avanzar",
+            OverallRecommendation.AdvanceWithCaution => "Avanzar negociando",
+            OverallRecommendation.WaitForDocuments => "Resolver pendientes antes de avanzar",
+            OverallRecommendation.Renegotiate => "Avanzar negociando",
+            OverallRecommendation.ProfessionalReview => "Riesgo alto - revisar con profesional",
             _ => "Faltan datos"
         };
     }
@@ -920,11 +1372,11 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
     {
         return recommendation switch
         {
-            OverallRecommendation.Advance => "La oportunidad es buena y la protección documental es aceptable con las reglas actuales.",
-            OverallRecommendation.AdvanceWithCaution => "La oportunidad parece buena, pero todavía hay riesgos o validaciones pendientes.",
+            OverallRecommendation.Advance => "La información disponible no muestra riesgos significativos.",
+            OverallRecommendation.AdvanceWithCaution => "Existen elementos que pueden utilizarse para negociar mejores condiciones.",
             OverallRecommendation.WaitForDocuments => "Conviene completar documentación clave antes de avanzar con una reserva.",
-            OverallRecommendation.Renegotiate => "Hay señales de precio, expensas o riesgos financieros que justifican renegociar.",
-            OverallRecommendation.Avoid => "Hay riesgos severos o incompatibilidades que conviene resolver antes de seguir.",
+            OverallRecommendation.Renegotiate => "Hay señales de precio, expensas o riesgos financieros que justifican negociar mejores condiciones.",
+            OverallRecommendation.ProfessionalReview => "Se detectaron hallazgos relevantes que justifican revisión profesional específica.",
             _ => "Faltan datos básicos para emitir una recomendación confiable."
         };
     }
@@ -960,7 +1412,7 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
             RecommendedUse.Living => "Vivienda",
             RecommendedUse.Investment => "Inversión",
             RecommendedUse.Both => "Vivienda e inversión",
-            RecommendedUse.NotRecommended => "No recomendado",
+            RecommendedUse.NotRecommended => "Requiere mas analisis",
             _ => "Sin recomendación"
         };
     }
@@ -1005,7 +1457,7 @@ public sealed class DeterministicPropertyReportBuilder : IPropertyReportBuilder
         AdvanceWithCaution = 2,
         WaitForDocuments = 3,
         Renegotiate = 4,
-        Avoid = 5,
+        ProfessionalReview = 5,
         InsufficientData = 6
     }
 

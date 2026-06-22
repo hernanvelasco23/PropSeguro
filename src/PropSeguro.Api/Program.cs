@@ -17,6 +17,7 @@ using PropSeguro.Api.Email;
 using PropSeguro.Api.Storage;
 using System.Text.Json.Serialization;
 using PropSeguro.Application;
+using PropSeguro.Application.PropertyAnalyses;
 using PropSeguro.Application.Common;
 using PropSeguro.Application.PropertyAnalyses.AnalyzePropertyDocument;
 using PropSeguro.Application.PropertyAnalyses.AddPropertyDocument;
@@ -880,7 +881,9 @@ propertyAnalyses.MapPost("/", async (
             request.HasAmenities,
             request.IsCreditEligible,
             request.PropertyCondition,
-            request.Notes), cancellationToken);
+            request.Notes,
+            request.VisitObservations,
+            request.VisitNotes), cancellationToken);
 
         return Results.Created($"/api/property-analyses/{result.Id}", result);
     }
@@ -1006,7 +1009,9 @@ propertyAnalyses.MapPut("/{id:guid}", async (
             request.HasAmenities,
             request.IsCreditEligible,
             request.PropertyCondition,
-            request.Notes), cancellationToken);
+            request.Notes,
+            request.VisitObservations,
+            request.VisitNotes), cancellationToken);
 
         return result is null ? Results.NotFound() : Results.Ok(result);
     }
@@ -1460,6 +1465,42 @@ propertyAnalyses.MapPut("/{analysisId:guid}/documents/{documentId:guid}/text", a
 })
 .WithName("SavePropertyDocumentText");
 
+propertyAnalyses.MapPost("/{analysisId:guid}/documents/{documentId:guid}/confirm-match", async (
+    Guid analysisId,
+    Guid documentId,
+    ApplicationDbContext dbContext,
+    ICurrentUserContext currentUser,
+    CancellationToken cancellationToken) =>
+{
+    var analysis = await dbContext.PropertyAnalyses
+        .Include(item => item.Documents)
+        .Include(item => item.RiskFindings)
+        .Include(item => item.ChecklistItems)
+        .FirstOrDefaultAsync(item => item.Id == analysisId, cancellationToken);
+
+    if (analysis is null || !currentUser.CanAccess(analysis))
+    {
+        return Results.NotFound();
+    }
+
+    var document = analysis.Documents.FirstOrDefault(item => item.Id == documentId);
+    if (document is null)
+    {
+        return Results.NotFound();
+    }
+
+    document.ConfirmMatchesProperty();
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    var documentFindings = await dbContext.DocumentFindings
+        .AsNoTracking()
+        .Where(item => item.PropertyAnalysisId == analysis.Id)
+        .ToListAsync(cancellationToken);
+
+    return Results.Ok(analysis.ToDto(documentFindings));
+})
+.WithName("ConfirmPropertyDocumentMatch");
+
 app.Run();
 
 public sealed record CreatePropertyAnalysisRequest(
@@ -1482,7 +1523,9 @@ public sealed record CreatePropertyAnalysisRequest(
     bool? HasAmenities,
     bool? IsCreditEligible,
     PropertyCondition? PropertyCondition,
-    string? Notes);
+    string? Notes,
+    IReadOnlyCollection<string>? VisitObservations,
+    string? VisitNotes);
 
 public sealed record UpdatePropertyAnalysisRequest(
     string Title,
@@ -1504,7 +1547,9 @@ public sealed record UpdatePropertyAnalysisRequest(
     bool? HasAmenities,
     bool? IsCreditEligible,
     PropertyCondition? PropertyCondition,
-    string? Notes);
+    string? Notes,
+    IReadOnlyCollection<string>? VisitObservations,
+    string? VisitNotes);
 
 public sealed record ListingImportRequest(string ListingUrl);
 
