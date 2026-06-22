@@ -62,6 +62,8 @@ public sealed class SavePropertyDocumentTextCommandHandler : IRequestHandler<Sav
             document.AnalysisStatus.ToString(),
             document.AnalyzedAtUtc,
             document.AnalysisSummary,
+            document.UserConfirmedMatchesProperty,
+            document.UserConfirmedMatchesPropertyAtUtc,
             document.DocumentType == DocumentType.Expenses
                 ? ExpenseDocumentValidator.Validate(
                     analysis,

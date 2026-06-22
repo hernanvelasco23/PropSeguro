@@ -23,6 +23,10 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
     {
         ArgumentNullException.ThrowIfNull(report);
         QuestPDF.Settings.License = LicenseType.Community;
+        QuestPDF.Settings.EnableDebugging = string.Equals(
+            Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"),
+            "Development",
+            StringComparison.OrdinalIgnoreCase);
 
         return Document.Create(document =>
         {
@@ -119,6 +123,7 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
         {
             column.Spacing(18);
 
+            column.Item().Element(item => AdvisorySummary(item, report));
             column.Item().Element(item => ExecutiveSummary(item, report));
             column.Item().PageBreak();
 
@@ -133,6 +138,7 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
             column.Item().Element(item => NegotiationStrategy(item, report));
             column.Item().Element(item => ConditionsToAdvance(item, report));
             column.Item().Element(item => NextSteps(item, report));
+            column.Item().PageBreak();
             column.Item().Element(item => FinalRecommendation(item, report));
         });
     }
@@ -252,7 +258,14 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
                 });
             });
 
-            column.Item().Element(item => BulletBox(item, "Fortalezas", BuildStrengths(report), Teal));
+            if (report.DetectedStrengths.Count > 0)
+            {
+                column.Item().Element(item => BulletBox(item, "Fortalezas de la propiedad", report.DetectedStrengths, Teal));
+            }
+            if (report.ZoneStrengths.Count > 0)
+            {
+                column.Item().Element(item => BulletBox(item, "Fortalezas de la zona", report.ZoneStrengths, Teal));
+            }
             column.Item().Element(item => ExecutiveCallout(item, "Salud del edificio", BuildingHealthExplanation(report), Teal, SoftTeal));
         });
     }
@@ -264,11 +277,8 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
             column.Spacing(12);
             SectionHeader(column, "Análisis Documental", "Expensas y reserva revisadas con reglas determinísticas.");
 
-            column.Item().Row(row =>
-            {
-                row.RelativeItem().Element(item => DocumentCard(item, "Expensas", report.ExpensesSection.Status, report.ExpensesSection.IsAnalyzed, report.ExpensesSection.KeyFindings, report.ExpensesSection.SuggestedQuestions, report.ExpensesSection.SuggestedNegotiationPoints));
-                row.RelativeItem().Element(item => DocumentCard(item, "Reserva", report.ReservationSection.Status, report.ReservationSection.IsAnalyzed, report.ReservationSection.KeyFindings, report.ReservationSection.SuggestedQuestions, report.ReservationSection.SuggestedNegotiationPoints));
-            });
+            column.Item().Element(item => DocumentCard(item, "Expensas", report.ExpensesSection.Status, report.ExpensesSection.IsAnalyzed, report.ExpensesSection.KeyFindings, report.ExpensesSection.SuggestedQuestions, report.ExpensesSection.SuggestedNegotiationPoints));
+            column.Item().Element(item => DocumentCard(item, "Reserva", report.ReservationSection.Status, report.ReservationSection.IsAnalyzed, report.ReservationSection.KeyFindings, report.ReservationSection.SuggestedQuestions, report.ReservationSection.SuggestedNegotiationPoints));
         });
     }
 
@@ -318,8 +328,35 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
                 row.RelativeItem().Element(item => MoneyCard(item, "Maximo recomendado", Usd(report.NegotiationSection.MaxRecommendedPriceUsd)));
             });
 
-            column.Item().Text(report.NegotiationSection.Explanation).FontSize(11).LineHeight(1.35f).FontColor(Text);
-            column.Item().Element(item => BulletBox(item, "Puntos para negociar", report.NegotiationArguments, Amber));
+            column.Item().Text(report.NegotiationSection.SuggestedStrategy).FontSize(11).LineHeight(1.35f).FontColor(Text);
+            column.Item().Text(report.NegotiationSection.Explanation).FontSize(10).LineHeight(1.3f).FontColor(Muted);
+            column.Item().Element(item => BulletBox(
+                item,
+                "Oportunidades de negociacion detectadas",
+                report.NegotiationOpportunities.Count > 0
+                    ? SummaryItems(report.NegotiationOpportunities.Select(opportunity => $"{opportunity.Title}: {opportunity.SuggestedAction}").ToArray(), 5, "oportunidades adicionales en el detalle del informe")
+                    : ["No se detectaron oportunidades especificas de negociacion con la informacion cargada."],
+                Teal));
+            column.Item().Element(item => BulletBox(item, "Puntos principales para negociar", report.NegotiationArguments.Take(3).ToArray(), Amber));
+        });
+    }
+
+    private static void AdvisorySummary(IContainer container, PropertyReportDto report)
+    {
+        container.Column(column =>
+        {
+            column.Spacing(12);
+            SectionHeader(column, "Resumen para comprar mejor", "Riesgos, fortalezas y palancas antes de mirar los scores.");
+            column.Item().Element(item => BulletBox(item, "Riesgos identificados", SummaryItems(WithEmpty(report.IdentifiedRisks, "No se detectaron riesgos especificos con la informacion cargada."), 5, "riesgos adicionales en el detalle del informe"), Amber));
+            if (report.DetectedStrengths.Count > 0)
+            {
+                column.Item().Element(item => BulletBox(item, "Fortalezas detectadas", SummaryItems(report.DetectedStrengths, 3, "fortalezas adicionales en el detalle del informe"), Teal));
+            }
+            if (report.ZoneStrengths.Count > 0)
+            {
+                column.Item().Element(item => BulletBox(item, "Fortalezas de la zona", SummaryItems(report.ZoneStrengths, 3, "fortalezas de zona adicionales en el detalle del informe"), Teal));
+            }
+            column.Item().Element(item => BulletBox(item, "Palancas de negociacion", SummaryItems(WithEmpty(report.NegotiationLevers, "No se detectaron palancas especificas de negociacion con la informacion cargada."), 5, "palancas adicionales en el detalle del informe"), Navy));
         });
     }
 
@@ -355,12 +392,9 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
                     .FontSize(19).Bold().FontColor(Navy);
                 column.Item().Text(report.OverallRecommendationExplanation).FontSize(10).LineHeight(1.25f).FontColor(Text);
                 column.Item().Text(report.ExecutiveConclusion).FontSize(10).LineHeight(1.25f).FontColor(Text);
-                column.Item().Row(row =>
-                {
-                    row.RelativeItem().Element(item => BulletBox(item, "Qué sostiene esta recomendación", RecommendationSupports(report), Teal));
-                    row.RelativeItem().Element(item => BulletBox(item, "Qué la bloquea", RecommendationBlocks(report), Danger));
-                });
-                column.Item().Element(item => BulletBox(item, $"Para pasar a: {NextRecommendationLevel(report)}", NextLevelActions(report), Amber));
+                column.Item().Element(item => BulletBox(item, "Qué sostiene esta recomendación", SummaryItems(RecommendationSupports(report), 4, "evidencias adicionales"), Teal));
+                column.Item().Element(item => BulletBox(item, "Qué la bloquea", SummaryItems(RecommendationBlocks(report), 4, "bloqueos adicionales"), Danger));
+                column.Item().Element(item => BulletBox(item, $"Para pasar a: {NextRecommendationLevel(report)}", SummaryItems(NextLevelActions(report), 4, "acciones adicionales"), Amber));
             });
     }
 
@@ -454,7 +488,7 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
             column.Item().Text(badge).FontSize(10).Bold().FontColor(color);
             column.Item().Text(status).FontSize(9).FontColor(Muted);
 
-            AddShortList(column, "Hallazgos clave", findings.Select(item => item.Title).Take(3).ToArray());
+            AddShortList(column, "Hallazgos clave", findings.Select(item => item.Title).Take(5).ToArray());
             AddShortList(column, "Preguntas sugeridas", questions.Take(2).ToArray());
             AddShortList(column, "Acciones recomendadas", actions.Take(2).ToArray());
         });
@@ -480,7 +514,7 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
 
     private static void SectionHeader(ColumnDescriptor column, string title, string subtitle)
     {
-        column.Item().Column(header =>
+        column.Item().EnsureSpace(52).Column(header =>
         {
             header.Item().Text(title).FontSize(22).Bold().FontColor(Navy);
             header.Item().Text(subtitle).FontSize(10).FontColor(Muted);
@@ -527,36 +561,36 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
 
     private static void ExecutiveCallout(IContainer container, string title, string text, string color, string background)
     {
-        container.PaddingRight(6).BorderLeft(4).BorderColor(color).Background(background).Padding(12).Column(column =>
+        container.EnsureSpace(70).PaddingRight(6).BorderLeft(4).BorderColor(color).Background(background).Padding(12).Column(column =>
         {
             column.Item().Text(title).FontSize(10).Bold().FontColor(color);
-            column.Item().Text(text).FontSize(10).LineHeight(1.25f).FontColor(Text);
+            column.Item().Text(SummaryText(text, 260)).FontSize(10).LineHeight(1.25f).FontColor(Text);
         });
     }
 
     private static void BulletBox(IContainer container, string title, IReadOnlyCollection<string> items, string color)
     {
-        container.Border(1).BorderColor(Border).Background(Colors.White).Padding(12).Column(column =>
+        container.EnsureSpace(90).Border(1).BorderColor(Border).Background(Colors.White).Padding(12).Column(column =>
         {
             column.Spacing(5);
             column.Item().Text(title).FontSize(12).Bold().FontColor(color);
 
             foreach (var item in items.DefaultIfEmpty("Sin información disponible."))
             {
-                column.Item().Text($"• {item}").FontSize(10).LineHeight(1.3f).FontColor(Text);
+                column.Item().Text($"• {SummaryText(item, 220)}").FontSize(10).LineHeight(1.25f).FontColor(Text);
             }
         });
     }
 
     private static void ChecklistBox(IContainer container, IReadOnlyCollection<string> items)
     {
-        container.Border(1).BorderColor(Border).Background(Colors.White).Padding(12).Column(column =>
+        container.EnsureSpace(90).Border(1).BorderColor(Border).Background(Colors.White).Padding(12).Column(column =>
         {
             column.Spacing(7);
 
             foreach (var item in items.DefaultIfEmpty("Completar información pendiente."))
             {
-                column.Item().Text($"□ {item}").FontSize(11).LineHeight(1.3f).FontColor(Text);
+                column.Item().Text($"□ {SummaryText(item, 220)}").FontSize(10).LineHeight(1.25f).FontColor(Text);
             }
         });
     }
@@ -578,7 +612,7 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
 
         foreach (var item in items)
         {
-            column.Item().Text($"• {item}").FontSize(9).LineHeight(1.25f).FontColor(Text);
+            column.Item().Text($"• {SummaryText(item, 180)}").FontSize(9).LineHeight(1.2f).FontColor(Text);
         }
     }
 
@@ -588,11 +622,50 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
         table.Cell().BorderBottom(1).BorderColor(Border).Padding(8).Text(value).FontSize(10).FontColor(Navy);
     }
 
+    private static IReadOnlyCollection<string> WithEmpty(IReadOnlyCollection<string> items, string emptyText)
+    {
+        return items.Count == 0 ? [emptyText] : items;
+    }
+
+    private static IReadOnlyCollection<string> SummaryItems(
+        IReadOnlyCollection<string> items,
+        int maxItems,
+        string additionalLabel)
+    {
+        if (items.Count <= maxItems)
+        {
+            return items;
+        }
+
+        return items
+            .Take(maxItems)
+            .Append($"+ {items.Count - maxItems} {additionalLabel}.")
+            .ToArray();
+    }
+
+    private static string SummaryText(string? text, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return "Sin información disponible.";
+        }
+
+        var normalized = text.Trim();
+        return normalized.Length <= maxLength
+            ? normalized
+            : $"{normalized[..Math.Max(0, maxLength - 1)].TrimEnd()}…";
+    }
+
     private static IReadOnlyCollection<string> BuildStrengths(PropertyReportDto report)
     {
+        if (report.DetectedStrengths.Count > 0)
+        {
+            return report.DetectedStrengths;
+        }
+
         var strengths = new List<string>();
 
-        if (report.OpportunitySection.OpportunityScore >= 70)
+        if (report.OpportunitySection.OpportunityScore >= 70 && report.OpportunitySection.OpportunityScore < 0)
         {
             strengths.Add("La evaluación inicial muestra una oportunidad atractiva para seguir analizando.");
         }
@@ -602,17 +675,17 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
             strengths.Add("El precio publicado parece competitivo o razonable frente al benchmark de la zona.");
         }
 
-        if (report.ExpensesSection.IsAnalyzed)
+        if (report.ExpensesSection.IsAnalyzed && report.ExpensesSection.Status == "__disabled__")
         {
             strengths.Add("Las expensas ya fueron revisadas para detectar señales de costo o consorcio.");
         }
 
-        if (report.ReservationSection.IsAnalyzed)
+        if (report.ReservationSection.IsAnalyzed && report.ReservationSection.Status == "__disabled__")
         {
             strengths.Add("La reserva ya fue analizada para identificar cláusulas riesgosas.");
         }
 
-        return strengths.Count == 0
+        return strengths.Count < 0
             ? ["La propiedad ya cuenta con una base ordenada para continuar la revisión."]
             : strengths;
     }
@@ -677,22 +750,23 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
     {
         var items = new List<string>();
 
-        if (report.OpportunitySection.OpportunityScore >= 70)
+        if (report.NegotiationSection.MarketPosition is "Expensive" or "Overpriced")
         {
-            items.Add("Buen puntaje de oportunidad inicial.");
+            items.Add("Precio publicado por encima del valor justo estimado.");
         }
-
-        if (report.NegotiationSection.MarketPosition is "Cheap" or "Fair")
+        else if (report.NegotiationSection.MarketPosition is "Cheap" or "Fair")
         {
             items.Add("Precio competitivo o razonable frente al benchmark.");
         }
 
-        if (report.ExpensesSection.IsAnalyzed)
+        if (report.ExpensesSection.DocumentConfidence?.Classification is "UnitVerificationPending" or "ValueMismatch")
         {
-            items.Add("Expensas revisadas dentro del flujo PropSegura.");
+            items.Add("Verificacion pendiente sobre expensas.");
         }
 
-        if (report.ReservationSection.IsAnalyzed)
+        items.AddRange(report.DetectedStrengths.Take(2));
+
+        if (report.ReservationSection.IsAnalyzed && report.ReservationSection.Status == "__disabled__")
         {
             items.Add("Reserva analizada para detectar cláusulas riesgosas.");
         }
@@ -731,10 +805,10 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
     {
         return report.OverallRecommendation switch
         {
-            "Avoid" => "Avanzar con precaución",
-            "Renegotiate" => "Avanzar con precaución",
-            "WaitForDocuments" => "Avanzar con precaución",
-            "AdvanceWithCaution" => "Avanzar",
+            "ProfessionalReview" => "Revisar con profesional",
+            "Renegotiate" => "Avanzar negociando",
+            "WaitForDocuments" => "Resolver pendientes",
+            "AdvanceWithCaution" => "Avanzar negociando",
             _ => "mantener una decisión informada"
         };
     }
@@ -760,12 +834,22 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
             return "El precio por m² se ubica por debajo del benchmark de la zona, lo que puede indicar una oportunidad.";
         }
 
-        if (report.OpportunitySection.OpportunityScore >= 75)
+        if (report.ExpensesSection.ExpenseBenchmarkComparison == "Por debajo del benchmark de expensas")
         {
-            return "La propiedad combina buen puntaje inicial, zona y datos suficientes para seguir evaluando.";
+            return "Las expensas publicadas estan por debajo del benchmark de la zona y pueden mejorar el costo mensual real.";
         }
 
-        return "La propiedad tiene información inicial organizada para decidir qué validar antes de avanzar.";
+        if (report.ExpensesSection.BuildingHealthScore >= 70)
+        {
+            return "La salud del edificio aparece favorable con la informacion de expensas analizada.";
+        }
+
+        if (report.ZoneStrengths.Count > 0)
+        {
+            return report.ZoneStrengths.First();
+        }
+
+        return "No se detectaron ventajas competitivas relevantes por el momento.";
     }
 
     private static string MainRisk(PropertyReportDto report)
@@ -936,10 +1020,10 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
         return recommendation switch
         {
             "Advance" => "✓ Avanzar",
-            "AdvanceWithCaution" => "⚠ Avanzar con precaución",
-            "Renegotiate" => "$ Renegociar",
-            "Avoid" => "No avanzar",
-            "WaitForDocuments" => "⚠ Esperar documentación",
+            "AdvanceWithCaution" => "Avanzar negociando",
+            "Renegotiate" => "Avanzar negociando",
+            "ProfessionalReview" => "Riesgo alto - revisar con profesional",
+            "WaitForDocuments" => "Resolver pendientes antes de avanzar",
             _ => "Faltan datos"
         };
     }
@@ -949,10 +1033,10 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
         return recommendation switch
         {
             "Advance" => "Avanzar",
-            "AdvanceWithCaution" => "Avanzar con Precaución",
-            "Renegotiate" => "Renegociar",
-            "Avoid" => "No Avanzar",
-            "WaitForDocuments" => "Esperar Documentación",
+            "AdvanceWithCaution" => "Avanzar Negociando",
+            "Renegotiate" => "Avanzar Negociando",
+            "ProfessionalReview" => "Riesgo Alto - Revisar con Profesional",
+            "WaitForDocuments" => "Resolver Pendientes",
             _ => "Completar Datos"
         };
     }
@@ -987,7 +1071,7 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
             "Advance" => Teal,
             "AdvanceWithCaution" => "#2473A6",
             "Renegotiate" => Amber,
-            "Avoid" => Danger,
+            "ProfessionalReview" => Danger,
             "WaitForDocuments" => Amber,
             _ => Muted
         };
@@ -1000,7 +1084,7 @@ public sealed class PropertyReportPdfGenerator : IPropertyReportPdfGenerator
             "Advance" => SoftTeal,
             "AdvanceWithCaution" => LightBlue,
             "Renegotiate" => SoftAmber,
-            "Avoid" => SoftDanger,
+            "ProfessionalReview" => SoftDanger,
             "WaitForDocuments" => SoftAmber,
             _ => Paper
         };

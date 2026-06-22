@@ -364,6 +364,8 @@ public sealed class PropertyAnalysisEndpointTests
                 true,
                 "Good",
                 null,
+                [],
+                null,
                 80,
                 60,
                 "Low",

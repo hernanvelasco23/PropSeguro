@@ -187,6 +187,10 @@ namespace PropSeguro.Infrastructure.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
+                    b.Property<string>("ApartmentUnit")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
                     b.Property<int?>("Bathrooms")
                         .HasColumnType("int");
 
@@ -233,10 +237,6 @@ namespace PropSeguro.Infrastructure.Migrations
 
                     b.Property<int?>("Floor")
                         .HasColumnType("int");
-
-                    b.Property<string>("ApartmentUnit")
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
 
                     b.Property<bool?>("HasAmenities")
                         .HasColumnType("bit");
@@ -322,18 +322,27 @@ namespace PropSeguro.Infrastructure.Migrations
                     b.Property<decimal?>("TotalSquareMeters")
                         .HasColumnType("decimal(10,2)");
 
+                    b.Property<string>("UnitIdentifier")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<decimal?>("UsdPerSquareMeter")
                         .HasColumnType("decimal(10,2)");
 
-                    b.Property<string>("UnitIdentifier")
-                        .HasMaxLength(80)
-                        .HasColumnType("nvarchar(80)");
-
                     b.Property<Guid>("UserId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("VisitNotes")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("VisitObservationsJson")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
 
                     b.HasKey("Id");
 
@@ -408,6 +417,12 @@ namespace PropSeguro.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
+
+                    b.Property<bool>("UserConfirmedMatchesProperty")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("UserConfirmedMatchesPropertyAtUtc")
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime>("UploadedAtUtc")
                         .HasColumnType("datetime2");

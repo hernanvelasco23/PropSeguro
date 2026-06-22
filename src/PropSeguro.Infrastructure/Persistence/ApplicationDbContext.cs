@@ -44,6 +44,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             builder.Property(analysis => analysis.IsCreditEligible);
             builder.Property(analysis => analysis.PropertyCondition).HasConversion<string>().HasMaxLength(40).IsRequired();
             builder.Property(analysis => analysis.Notes).HasMaxLength(4000);
+            builder.Property(analysis => analysis.VisitObservationsJson).HasMaxLength(2000).IsRequired();
+            builder.Property(analysis => analysis.VisitNotes).HasMaxLength(4000);
             builder.Property(analysis => analysis.OpportunityScore).IsRequired();
             builder.Property(analysis => analysis.ProtectionScore).IsRequired();
             builder.Property(analysis => analysis.InitialRiskLevel).HasConversion<string>().HasMaxLength(40).IsRequired();
@@ -112,6 +114,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             builder.Property(document => document.AnalysisStatus).HasConversion<string>().HasMaxLength(40).IsRequired();
             builder.Property(document => document.AnalyzedAtUtc);
             builder.Property(document => document.AnalysisSummary).HasMaxLength(1000);
+            builder.Property(document => document.UserConfirmedMatchesProperty).IsRequired();
+            builder.Property(document => document.UserConfirmedMatchesPropertyAtUtc);
         });
 
         modelBuilder.Entity<DocumentFinding>(builder =>

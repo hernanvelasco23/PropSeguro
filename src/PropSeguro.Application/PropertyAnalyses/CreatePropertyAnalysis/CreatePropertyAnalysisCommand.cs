@@ -25,7 +25,9 @@ public sealed record CreatePropertyAnalysisCommand(
     bool? HasAmenities,
     bool? IsCreditEligible,
     PropertyCondition? PropertyCondition,
-    string? Notes) : IRequest<PropertyAnalysisDto>;
+    string? Notes,
+    IReadOnlyCollection<string>? VisitObservations = null,
+    string? VisitNotes = null) : IRequest<PropertyAnalysisDto>;
 
 public sealed class CreatePropertyAnalysisCommandHandler : IRequestHandler<CreatePropertyAnalysisCommand, PropertyAnalysisDto>
 {
@@ -76,6 +78,8 @@ public sealed class CreatePropertyAnalysisCommandHandler : IRequestHandler<Creat
             request.IsCreditEligible,
             request.PropertyCondition,
             request.Notes);
+
+        analysis.UpdateVisitObservations(request.VisitObservations, request.VisitNotes);
 
         if (_currentUser?.UserId is { } userId)
         {

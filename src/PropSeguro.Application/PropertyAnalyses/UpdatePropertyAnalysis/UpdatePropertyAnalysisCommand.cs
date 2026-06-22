@@ -26,7 +26,9 @@ public sealed record UpdatePropertyAnalysisCommand(
     bool? HasAmenities,
     bool? IsCreditEligible,
     PropertyCondition? PropertyCondition,
-    string? Notes) : IRequest<PropertyAnalysisDto?>;
+    string? Notes,
+    IReadOnlyCollection<string>? VisitObservations = null,
+    string? VisitNotes = null) : IRequest<PropertyAnalysisDto?>;
 
 public sealed class UpdatePropertyAnalysisCommandHandler : IRequestHandler<UpdatePropertyAnalysisCommand, PropertyAnalysisDto?>
 {
@@ -73,6 +75,11 @@ public sealed class UpdatePropertyAnalysisCommandHandler : IRequestHandler<Updat
             request.IsCreditEligible,
             request.PropertyCondition,
             request.Notes);
+
+        if (request.VisitObservations is not null || request.VisitNotes is not null)
+        {
+            analysis.UpdateVisitObservations(request.VisitObservations, request.VisitNotes);
+        }
 
         var documentFindings = await _dbContext.DocumentFindings
             .Where(item => item.PropertyAnalysisId == request.Id)

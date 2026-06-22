@@ -22,6 +22,11 @@ public sealed record ExpenseDocumentValidation(
 
 public static partial class ExpenseDocumentValidator
 {
+    public const string UnitVerificationPendingClassification = "UnitVerificationPending";
+    public const string ValueMismatchClassification = "ValueMismatch";
+    public const string ExpenseUnitMismatchCode = "EXPENSE_UNIT_MISMATCH";
+    public const string ExpenseValueMismatchCode = "EXPENSE_VALUE_MISMATCH";
+
     public static ExpenseDocumentValidation Validate(PropertyAnalysis analysis, PropertyDocument document, string? text)
     {
         var extraction = Extract(text);
@@ -31,7 +36,8 @@ public static partial class ExpenseDocumentValidator
         {
             "Validated" => 95,
             "PartiallyValidated" => 68,
-            "Mismatch" => 25,
+            UnitVerificationPendingClassification => 58,
+            ValueMismatchClassification => 35,
             _ => 40
         };
 
@@ -89,21 +95,21 @@ public static partial class ExpenseDocumentValidator
         var hasPropertyUnit = analysis.Floor.HasValue || HasValue(analysis.ApartmentUnit) || HasValue(analysis.UnitIdentifier);
         var hasDocumentUnit = extraction.DetectedFloor.HasValue || HasValue(extraction.DetectedApartmentUnit) || HasValue(extraction.DetectedUnitIdentifier);
         var unitMismatch = IsUnitMismatch(analysis, extraction);
-        var amountMismatch = IsExpenseAmountMismatch(analysis.MonthlyExpenses, extraction.DetectedExpenseAmount);
+        var amountDifference = CalculateExpenseAmountDifference(analysis.MonthlyExpenses, extraction.DetectedExpenseAmount);
 
         if (unitMismatch)
         {
             findings.Add(new DocumentFinding(
                 document.Id,
                 analysis.Id,
-                FindingSeverity.High,
+                FindingSeverity.Medium,
                 FindingCategory.Documentation,
-                "Las expensas podrian corresponder a otra unidad",
-                "El documento parece indicar una unidad distinta a la cargada para la propiedad.",
+                "Verificacion pendiente de unidad",
+                "El documento indica una unidad distinta a la cargada para la propiedad.",
                 "Podes confirmar que estas expensas corresponden exactamente al piso y departamento publicado?",
-                "No avanzar con la reserva hasta validar que la liquidacion corresponde a la unidad correcta.",
-                "El analisis de expensas podria no corresponder a este departamento.",
-                "No avanzar con la reserva hasta validar que la liquidacion corresponde a la unidad correcta.",
+                "Conviene validar que la liquidacion corresponde a la unidad correcta antes de usarla como referencia.",
+                "El analisis de expensas podria estar usando un documento de otra unidad.",
+                "Confirmar correspondencia de unidad o cargar la liquidacion correcta.",
                 BuildMatchedUnitText(extraction)));
         }
         else if (!hasPropertyUnit && hasDocumentUnit)
@@ -136,19 +142,34 @@ public static partial class ExpenseDocumentValidator
                 "Pedir una liquidacion donde figure piso, departamento o unidad funcional."));
         }
 
-        if (amountMismatch)
+        if (amountDifference is > 0.25m)
         {
             findings.Add(new DocumentFinding(
                 document.Id,
                 analysis.Id,
                 FindingSeverity.High,
                 FindingCategory.Financial,
-                "Las expensas del documento no coinciden con la publicacion",
+                "Las expensas del documento difieren del valor publicado",
                 "El valor detectado en el documento difiere significativamente del valor cargado o publicado.",
                 "Cual es el valor real y actualizado de las expensas de esta unidad?",
                 "Usar la diferencia de expensas como argumento para renegociar precio o condiciones.",
                 "Podrias estar evaluando la propiedad con un costo mensual incorrecto.",
                 "Usar la diferencia de expensas como argumento para renegociar precio o condiciones.",
+                extraction.DetectedExpenseAmount?.ToString("N0", CultureInfo.InvariantCulture)));
+        }
+        else if (amountDifference is > 0.10m)
+        {
+            findings.Add(new DocumentFinding(
+                document.Id,
+                analysis.Id,
+                FindingSeverity.Medium,
+                FindingCategory.Financial,
+                "Diferencia moderada entre expensas publicadas y documento",
+                "El valor detectado en el documento difiere entre 10% y 25% del valor cargado o publicado.",
+                "El valor publicado de expensas esta actualizado con la ultima liquidacion?",
+                "Pedir confirmacion del monto vigente antes de ajustar la oferta.",
+                "La diferencia no invalida el analisis, pero conviene confirmar el costo mensual real.",
+                "Pedir confirmacion del monto vigente antes de ajustar la oferta.",
                 extraction.DetectedExpenseAmount?.ToString("N0", CultureInfo.InvariantCulture)));
         }
         else if (!analysis.MonthlyExpenses.HasValue || !extraction.DetectedExpenseAmount.HasValue)
@@ -174,16 +195,21 @@ public static partial class ExpenseDocumentValidator
         ExpenseUnitExtraction extraction,
         IReadOnlyCollection<DocumentFinding> findings)
     {
-        if (findings.Any(finding => finding.Severity == FindingSeverity.High))
+        if (findings.Any(finding => finding.Title == "Las expensas del documento difieren del valor publicado"))
         {
-            return "Mismatch";
+            return ValueMismatchClassification;
+        }
+
+        if (findings.Any(finding => finding.Title == "Verificacion pendiente de unidad"))
+        {
+            return UnitVerificationPendingClassification;
         }
 
         var hasPropertyUnit = analysis.Floor.HasValue || HasValue(analysis.ApartmentUnit) || HasValue(analysis.UnitIdentifier);
         var hasDocumentUnit = extraction.DetectedFloor.HasValue || HasValue(extraction.DetectedApartmentUnit) || HasValue(extraction.DetectedUnitIdentifier);
         var amountClose = analysis.MonthlyExpenses.HasValue &&
             extraction.DetectedExpenseAmount.HasValue &&
-            !IsExpenseAmountMismatch(analysis.MonthlyExpenses, extraction.DetectedExpenseAmount);
+            CalculateExpenseAmountDifference(analysis.MonthlyExpenses, extraction.DetectedExpenseAmount) is <= 0.10m;
 
         if (!hasDocumentUnit)
         {
@@ -209,7 +235,8 @@ public static partial class ExpenseDocumentValidator
         {
             "Validated" => "Documento validado",
             "PartiallyValidated" => "Validacion parcial",
-            "Mismatch" => "Posible documento incorrecto",
+            UnitVerificationPendingClassification => "Verificacion pendiente de unidad",
+            ValueMismatchClassification => "Diferencia de valor",
             _ => "No validado"
         };
     }
@@ -225,7 +252,8 @@ public static partial class ExpenseDocumentValidator
         {
             "Validated" => $"La unidad detectada coincide con los datos cargados.{amountText}",
             "PartiallyValidated" => $"Se detectaron datos parciales para validar las expensas. {unitText}{amountText}".Trim(),
-            "Mismatch" => $"Hay diferencias relevantes entre la publicacion y el documento. {unitText}{amountText}".Trim(),
+            UnitVerificationPendingClassification => $"La unidad detectada no coincide plenamente con los datos cargados. {unitText}{amountText}".Trim(),
+            ValueMismatchClassification => $"El valor detectado en el documento difiere del valor publicado o cargado. {unitText}{amountText}".Trim(),
             _ => "No se detectaron datos suficientes de unidad o importe para validar automaticamente este documento."
         };
     }
@@ -254,15 +282,14 @@ public static partial class ExpenseDocumentValidator
         return false;
     }
 
-    private static bool IsExpenseAmountMismatch(decimal? expected, decimal? detected)
+    private static decimal? CalculateExpenseAmountDifference(decimal? expected, decimal? detected)
     {
         if (!expected.HasValue || !detected.HasValue || expected.Value <= 0)
         {
-            return false;
+            return null;
         }
 
-        var difference = Math.Abs(expected.Value - detected.Value) / expected.Value;
-        return difference > 0.15m;
+        return Math.Abs(expected.Value - detected.Value) / expected.Value;
     }
 
     private static bool ValuesMatch(string? left, string? right)

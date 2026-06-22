@@ -68,7 +68,7 @@ public sealed class PropertyReportBuilderTests
         var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
 
         Assert.NotNull(report);
-        Assert.Equal("Avoid", report.OverallRecommendation);
+        Assert.Equal("ProfessionalReview", report.OverallRecommendation);
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public sealed class PropertyReportBuilderTests
             analysis.Id,
             FindingSeverity.High,
             FindingCategory.Financial,
-            "Las expensas del documento no coinciden con la publicacion",
+            "Las expensas del documento difieren del valor publicado",
             "El valor detectado en el documento difiere significativamente del valor cargado o publicado.");
         dbContext.PropertyAnalyses.Add(analysis);
         dbContext.DocumentFindings.Add(finding);
@@ -150,6 +150,8 @@ public sealed class PropertyReportBuilderTests
         Assert.Equal(500m, report.ExpensesSection.MonthlyExpensesPerSquareMeter);
         Assert.Equal(2800m, report.ExpensesSection.BenchmarkMonthlyExpensesPerSquareMeter);
         Assert.Equal("Por debajo del benchmark de expensas", report.ExpensesSection.ExpenseBenchmarkComparison);
+        Assert.Equal("Preliminar - datos de publicacion", report.ExpensesSection.AnalysisSource);
+        Assert.Equal("Sin documento de expensas cargado", report.ExpensesSection.PublishedVsDocumentStatus);
         Assert.DoesNotContain(report.MoneyRisks, risk => risk.Title.Contains("Expensas altas", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(report.WhatThisMeansForYou, item => item.Contains("por debajo del benchmark mensual", StringComparison.OrdinalIgnoreCase));
     }
@@ -259,7 +261,7 @@ public sealed class PropertyReportBuilderTests
             analysis.Id,
             FindingSeverity.High,
             FindingCategory.Financial,
-            "Las expensas del documento no coinciden con la publicacion",
+            "Las expensas del documento difieren del valor publicado",
             "El valor detectado difiere del publicado.");
         dbContext.PropertyAnalyses.Add(analysis);
         dbContext.DocumentFindings.Add(finding);
@@ -270,6 +272,39 @@ public sealed class PropertyReportBuilderTests
         Assert.NotNull(report);
         Assert.Equal("NeedsReview", report.ReportStatus);
         Assert.NotEmpty(report.MoneyRisks);
+    }
+
+    [Fact]
+    public async Task Report_deduplicates_findings_by_stable_code()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId);
+        var expenses = analysis.AddDocument(Guid.NewGuid(), DocumentType.Expenses, "expensas.pdf", "application/pdf", 1024, "storage/expensas.pdf");
+        expenses.CompleteAnalysis("Expensas revisadas", LastAnalyzedTextSource.ExtractedText, []);
+        var firstFinding = new DocumentFinding(
+            expenses.Id,
+            analysis.Id,
+            FindingSeverity.High,
+            FindingCategory.Financial,
+            "Las expensas del documento difieren del valor publicado",
+            "El valor detectado difiere del publicado.");
+        var duplicatedLegacyFinding = new DocumentFinding(
+            expenses.Id,
+            analysis.Id,
+            FindingSeverity.High,
+            FindingCategory.Financial,
+            "Las expensas del documento no coinciden con la publicacion",
+            "Misma senal con titulo anterior.");
+        dbContext.PropertyAnalyses.Add(analysis);
+        dbContext.DocumentFindings.AddRange(firstFinding, duplicatedLegacyFinding);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Single(report.FindingsSection.Groups.SelectMany(group => group.Findings), finding => finding.Code == "EXPENSE_VALUE_MISMATCH");
+        Assert.Single(report.MoneyRisks, risk => risk.Title.Contains("expensas", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -355,6 +390,82 @@ public sealed class PropertyReportBuilderTests
     }
 
     [Fact]
+    public async Task Report_highlights_reinforced_humidity_negotiation_opportunity()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId, priceUsd: 220000);
+        analysis.UpdateVisitObservations(["Humedad"], "Se ve humedad en el dormitorio.");
+        var document = analysis.AddDocument(Guid.NewGuid(), DocumentType.ReservationAgreement, "reserva.pdf", "application/pdf", 1024, "storage/reserva.pdf");
+        var finding = new DocumentFinding(
+            document.Id,
+            analysis.Id,
+            FindingSeverity.Medium,
+            FindingCategory.Negotiation,
+            "Clausula de humedad",
+            "La reserva menciona humedad y filtracion pendiente de aclaracion.");
+        dbContext.PropertyAnalyses.Add(analysis);
+        dbContext.DocumentFindings.Add(finding);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        var opportunity = Assert.Single(report.NegotiationOpportunities, item => item.Title == "Humedad observada + mencionada en la reserva");
+        Assert.Equal("Alto", opportunity.Impact);
+        Assert.Contains("renegociacion fuerte", report.NegotiationSection.SuggestedStrategy);
+        Assert.Contains(report.NegotiationArguments, item => item.Contains("Observaciones de visita", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(report.NegotiationLevers, item => item.StartsWith($"{opportunity.Title}:", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Report_detects_strengths_from_existing_positive_evidence()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId, priceUsd: 150000, monthlyExpenses: 90000);
+        var expenses = analysis.AddDocument(Guid.NewGuid(), DocumentType.Expenses, "expensas.pdf", "application/pdf", 1024, "storage/expensas.pdf");
+        const string expenseText = "Piso 8 Depto B Ascensor y reparaciones menores. Total a pagar $ 90.000";
+        expenses.StoreExtractedText(expenseText);
+        expenses.CompleteAnalysis("Expensas revisadas", LastAnalyzedTextSource.ExtractedText, []);
+        dbContext.PropertyAnalyses.Add(analysis);
+        dbContext.DocumentFindings.AddRange(DocumentAnalysisRuleEngine.Analyze(expenses, expenseText));
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.DoesNotContain(report.DetectedStrengths, item => item.Contains("Informacion inicial completa", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(report.DetectedStrengths, item => item.Contains("Documento de expensas analizado", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(report.DetectedStrengths, item => item.Contains("mercado comparable", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(report.ZoneStrengths, item => item.Contains("zona consolidada", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(report.DetectedStrengths, item => item.Contains("Salud del edificio", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(report.ExpensesSection.KeyFindings, item => item.Code == "EXPENSE_ELEVATOR_REFERENCE");
+        Assert.Contains(report.ExpensesSection.KeyFindings, item => item.Code == "EXPENSE_WORKS_DETECTED");
+    }
+
+    [Fact]
+    public async Task Report_keeps_negotiation_opportunities_empty_without_specific_signals()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId, priceUsd: 115000, monthlyExpenses: 200);
+        MarkChecklistProvided(analysis);
+        var reservation = analysis.AddDocument(Guid.NewGuid(), DocumentType.ReservationAgreement, "reserva.pdf", "application/pdf", 1024, "storage/reserva.pdf");
+        reservation.CompleteAnalysis("Reserva revisada", LastAnalyzedTextSource.ManualText, []);
+        var expenses = analysis.AddDocument(Guid.NewGuid(), DocumentType.Expenses, "expensas.pdf", "application/pdf", 1024, "storage/expensas.pdf");
+        expenses.CompleteAnalysis("Expensas revisadas", LastAnalyzedTextSource.ExtractedText, []);
+        dbContext.PropertyAnalyses.Add(analysis);
+        await dbContext.SaveChangesAsync();
+
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        Assert.NotNull(report);
+        Assert.Empty(report.NegotiationOpportunities);
+        Assert.Contains("oferta alineada", report.NegotiationSection.SuggestedStrategy);
+    }
+
+    [Fact]
     public async Task Pdf_generator_creates_pdf_document()
     {
         await using var dbContext = CreateDbContext();
@@ -385,6 +496,46 @@ public sealed class PropertyReportBuilderTests
         var bytes = new PropertyReportPdfGenerator().Generate(report!);
 
         Assert.StartsWith("%PDF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4));
+    }
+
+    [Fact]
+    public async Task Pdf_generator_paginates_large_report_without_layout_exception()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var analysis = CreateAnalysis(userId, priceUsd: 230000, monthlyExpenses: 260000);
+        analysis.UpdateVisitObservations(
+            ["Humedad", "Grietas", "Problemas electricos", "Problemas de agua", "Falta de ventilacion", "Ruidos", "Fachada deteriorada"],
+            "Durante la visita se observaron varias situaciones que conviene validar con detalle antes de mejorar la oferta o firmar una reserva.");
+
+        var expenses = analysis.AddDocument(Guid.NewGuid(), DocumentType.Expenses, "expensas.pdf", "application/pdf", 1024, "storage/expensas.pdf");
+        expenses.CompleteAnalysis("Expensas revisadas", LastAnalyzedTextSource.ExtractedText, []);
+        var reservation = analysis.AddDocument(Guid.NewGuid(), DocumentType.ReservationAgreement, "reserva.pdf", "application/pdf", 1024, "storage/reserva.pdf");
+        reservation.CompleteAnalysis("Reserva revisada", LastAnalyzedTextSource.ManualText, []);
+
+        dbContext.PropertyAnalyses.Add(analysis);
+        for (var index = 0; index < 24; index++)
+        {
+            dbContext.DocumentFindings.Add(new DocumentFinding(
+                index % 2 == 0 ? expenses.Id : reservation.Id,
+                analysis.Id,
+                index % 3 == 0 ? FindingSeverity.High : FindingSeverity.Medium,
+                index % 2 == 0 ? FindingCategory.Financial : FindingCategory.Negotiation,
+                $"Senal de negociacion extensa {index + 1}",
+                "Descripcion larga para validar que el PDF puede paginar contenido variable sin forzar la tarjeta completa dentro de una sola pagina.",
+                "Que informacion adicional puede respaldar o descartar esta senal antes de avanzar?",
+                "Pedir aclaracion por escrito y usar la respuesta para ordenar precio, condiciones o reparaciones pendientes.",
+                "Puede afectar el costo real, la negociacion o la necesidad de revision profesional antes de avanzar.",
+                "Usar este punto como argumento concreto de negociacion."));
+        }
+
+        await dbContext.SaveChangesAsync();
+        var report = await new DeterministicPropertyReportBuilder(dbContext, User(userId)).BuildAsync(analysis.Id);
+
+        var bytes = new PropertyReportPdfGenerator().Generate(report!);
+
+        Assert.StartsWith("%PDF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4));
+        Assert.True(bytes.Length > 1000);
     }
 
     private static ApplicationDbContext CreateDbContext()
