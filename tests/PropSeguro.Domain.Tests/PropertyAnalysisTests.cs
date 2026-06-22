@@ -67,7 +67,7 @@ public sealed class PropertyAnalysisTests
         Assert.NotNull(analysis.SuggestedTargetPriceUsd);
         Assert.True(analysis.SuggestedFirstOfferUsd < analysis.SuggestedTargetPriceUsd);
         AssertValidNegotiationRange(analysis);
-        Assert.Contains("promedio estimado", analysis.NegotiationExplanation);
+        Assert.Contains("rango estimado", analysis.NegotiationExplanation);
     }
 
     [Fact]
@@ -97,6 +97,42 @@ public sealed class PropertyAnalysisTests
         Assert.True(analysis.SuggestedFirstOfferUsd < analysis.SuggestedTargetPriceUsd);
         Assert.True(analysis.NegotiationMarginPercent >= 0);
         Assert.True(analysis.SuggestedTargetPriceUsd <= analysis.EstimatedFairValueMaxUsd);
+        Assert.Equal(80000m, analysis.MaxRecommendedPriceUsd);
+        Assert.Contains("no como motivo para pagar por encima del publicado", analysis.NegotiationExplanation);
+        AssertValidNegotiationRange(analysis);
+    }
+
+    [Fact]
+    public void Negotiation_when_published_price_is_below_fair_value_keeps_targets_below_published_price()
+    {
+        var analysis = CreateAnalysis(priceUsd: 180000, neighborhood: "Palermo");
+
+        analysis.RunInitialAnalysis();
+
+        Assert.Equal(MarketPosition.Fair, analysis.MarketPosition);
+        Assert.Equal(184700m, analysis.EstimatedFairValueMinUsd);
+        Assert.Equal(204100m, analysis.EstimatedFairValueMaxUsd);
+        Assert.Equal(169200m, analysis.SuggestedFirstOfferUsd);
+        Assert.Equal(174600m, analysis.SuggestedTargetPriceUsd);
+        Assert.Equal(180000m, analysis.MaxRecommendedPriceUsd);
+        Assert.Contains("por debajo del rango estimado", analysis.NegotiationExplanation);
+        AssertValidNegotiationRange(analysis);
+    }
+
+    [Fact]
+    public void Negotiation_when_published_price_is_inside_fair_value_uses_moderate_negotiation()
+    {
+        var analysis = CreateAnalysis(priceUsd: 190000, neighborhood: "Palermo");
+
+        analysis.RunInitialAnalysis();
+
+        Assert.Equal(MarketPosition.Fair, analysis.MarketPosition);
+        Assert.True(analysis.PriceUsd >= analysis.EstimatedFairValueMinUsd);
+        Assert.True(analysis.PriceUsd <= analysis.EstimatedFairValueMaxUsd);
+        Assert.Equal(174800m, analysis.SuggestedFirstOfferUsd);
+        Assert.Equal(182400m, analysis.SuggestedTargetPriceUsd);
+        Assert.Equal(190000m, analysis.MaxRecommendedPriceUsd);
+        AssertValidNegotiationRange(analysis);
     }
 
     [Fact]
@@ -109,7 +145,9 @@ public sealed class PropertyAnalysisTests
         Assert.Equal(2800m, analysis.UsdPerSquareMeter);
         Assert.Equal(MarketPosition.Fair, analysis.MarketPosition);
         Assert.Equal(163000m, analysis.SuggestedTargetPriceUsd);
-        Assert.Equal(159600m, analysis.SuggestedFirstOfferUsd);
+        Assert.Equal(157900m, analysis.SuggestedFirstOfferUsd);
+        Assert.Equal(168000m, analysis.MaxRecommendedPriceUsd);
+        AssertValidNegotiationRange(analysis);
     }
 
     [Fact]
@@ -120,9 +158,9 @@ public sealed class PropertyAnalysisTests
         analysis.RunInitialAnalysis();
 
         Assert.Equal(MarketPosition.Overpriced, analysis.MarketPosition);
-        Assert.Equal(198000m, analysis.SuggestedTargetPriceUsd);
-        Assert.Equal(184700m, analysis.SuggestedFirstOfferUsd);
-        Assert.Equal(10m, analysis.NegotiationMarginPercent);
+        Assert.Equal(204100m, analysis.SuggestedTargetPriceUsd);
+        Assert.Equal(187000m, analysis.SuggestedFirstOfferUsd);
+        Assert.Equal(7.2m, analysis.NegotiationMarginPercent);
         AssertValidNegotiationRange(analysis);
     }
 
@@ -138,8 +176,23 @@ public sealed class PropertyAnalysisTests
         Assert.Equal(78200m, analysis.EstimatedFairValueMaxUsd);
         Assert.Equal(70800m, analysis.SuggestedFirstOfferUsd);
         Assert.Equal(78200m, analysis.SuggestedTargetPriceUsd);
-        Assert.Equal(84400m, analysis.MaxRecommendedPriceUsd);
+        Assert.Equal(78200m, analysis.MaxRecommendedPriceUsd);
         Assert.Contains("renegociacion fuerte", analysis.NegotiationExplanation);
+        AssertValidNegotiationRange(analysis);
+    }
+
+    [Fact]
+    public void Negotiation_when_published_price_is_above_fair_value_caps_target_and_maximum_at_fair_value()
+    {
+        var analysis = CreateAnalysis(priceUsd: 220000, neighborhood: "Palermo");
+
+        analysis.RunInitialAnalysis();
+
+        Assert.Equal(MarketPosition.Overpriced, analysis.MarketPosition);
+        Assert.True(analysis.PriceUsd > analysis.EstimatedFairValueMaxUsd);
+        Assert.Equal(187000m, analysis.SuggestedFirstOfferUsd);
+        Assert.Equal(204100m, analysis.SuggestedTargetPriceUsd);
+        Assert.Equal(204100m, analysis.MaxRecommendedPriceUsd);
         AssertValidNegotiationRange(analysis);
     }
 
@@ -152,8 +205,10 @@ public sealed class PropertyAnalysisTests
 
         Assert.Equal(2700m, analysis.UsdPerSquareMeter);
         Assert.Equal(MarketPosition.Cheap, analysis.MarketPosition);
-        Assert.Equal(159600m, analysis.SuggestedTargetPriceUsd);
-        Assert.Equal(157100m, analysis.SuggestedFirstOfferUsd);
+        Assert.Equal(157100m, analysis.SuggestedTargetPriceUsd);
+        Assert.Equal(152300m, analysis.SuggestedFirstOfferUsd);
+        Assert.Equal(162000m, analysis.MaxRecommendedPriceUsd);
+        AssertValidNegotiationRange(analysis);
     }
 
     [Fact]
@@ -272,8 +327,10 @@ public sealed class PropertyAnalysisTests
         Assert.NotNull(analysis.MaxRecommendedPriceUsd);
 
         Assert.True(analysis.SuggestedFirstOfferUsd <= analysis.SuggestedTargetPriceUsd);
-        Assert.True(analysis.SuggestedTargetPriceUsd <= analysis.EstimatedFairValueMaxUsd);
         Assert.True(analysis.MaxRecommendedPriceUsd >= analysis.SuggestedTargetPriceUsd);
-        Assert.True(analysis.MaxRecommendedPriceUsd <= analysis.EstimatedFairValueMaxUsd * 1.08m);
+        Assert.True(analysis.SuggestedTargetPriceUsd <= analysis.PriceUsd);
+        Assert.True(analysis.MaxRecommendedPriceUsd <= analysis.PriceUsd);
+        Assert.True(analysis.MaxRecommendedPriceUsd <= analysis.EstimatedFairValueMaxUsd * 1.08m ||
+            analysis.PriceUsd < analysis.EstimatedFairValueMinUsd);
     }
 }

@@ -552,8 +552,8 @@ public sealed class PropertyAnalysis
         EstimatedFairValueMinUsd = RoundMoney(fairValue * 0.95m);
         EstimatedFairValueMaxUsd = RoundMoney(fairValue * 1.05m);
 
-        var target = CalculateSuggestedTargetPrice(EstimatedFairValueMaxUsd.Value);
-        var firstOffer = CalculateSuggestedFirstOffer(target, EstimatedFairValueMinUsd.Value);
+        var target = CalculateSuggestedTargetPrice(EstimatedFairValueMinUsd.Value, EstimatedFairValueMaxUsd.Value);
+        var firstOffer = CalculateSuggestedFirstOffer(target, EstimatedFairValueMinUsd.Value, EstimatedFairValueMaxUsd.Value);
 
         SuggestedTargetPriceUsd = RoundMoney(target);
         SuggestedFirstOfferUsd = RoundMoney(firstOffer);
@@ -561,32 +561,32 @@ public sealed class PropertyAnalysis
         NegotiationExplanation = BuildNegotiationExplanation(benchmark, qualityAdjustment);
     }
 
-    private decimal CalculateSuggestedTargetPrice(decimal fairValueHigh)
+    private decimal CalculateSuggestedTargetPrice(decimal fairValueLow, decimal fairValueHigh)
     {
-        var targetFromPublishedPrice = MarketPosition switch
+        var publishedPrice = PriceUsd!.Value;
+        var targetFromPublishedPrice = publishedPrice switch
         {
-            MarketPosition.Cheap => PriceUsd!.Value * 0.985m,
-            MarketPosition.Fair => PriceUsd!.Value * 0.97m,
-            MarketPosition.Expensive => PriceUsd!.Value * 0.935m,
-            MarketPosition.Overpriced => PriceUsd!.Value * 0.90m,
-            _ => PriceUsd!.Value
+            var price when price < fairValueLow => price * 0.97m,
+            var price when price <= fairValueHigh => price * 0.96m,
+            _ => Math.Min(fairValueHigh, publishedPrice * 0.95m)
         };
 
-        return Math.Min(targetFromPublishedPrice, fairValueHigh);
+        return Math.Min(targetFromPublishedPrice, publishedPrice);
     }
 
-    private decimal CalculateSuggestedFirstOffer(decimal target, decimal fairValueLow)
+    private decimal CalculateSuggestedFirstOffer(decimal target, decimal fairValueLow, decimal fairValueHigh)
     {
-        var firstOfferFromPublishedPrice = MarketPosition switch
+        var publishedPrice = PriceUsd!.Value;
+        var firstOfferFromPublishedPrice = publishedPrice switch
         {
-            MarketPosition.Cheap => PriceUsd!.Value * 0.97m,
-            MarketPosition.Fair => PriceUsd!.Value * 0.95m,
-            MarketPosition.Expensive => PriceUsd!.Value * 0.91m,
-            MarketPosition.Overpriced => PriceUsd!.Value * 0.86m,
-            _ => target * 0.97m
+            var price when price < fairValueLow => price * 0.94m,
+            var price when price <= fairValueHigh => price * 0.92m,
+            _ => publishedPrice * 0.85m <= target
+                ? publishedPrice * 0.85m
+                : fairValueLow
         };
 
-        return Math.Min(Math.Min(firstOfferFromPublishedPrice, fairValueLow), target);
+        return Math.Min(firstOfferFromPublishedPrice, target);
     }
 
     private decimal? CalculateMaxRecommendedPrice()
@@ -597,6 +597,11 @@ public sealed class PropertyAnalysis
         }
 
         var qualityAdjustment = CalculateFairValueAdjustment();
+        if (PriceUsd.HasValue && PriceUsd.Value > EstimatedFairValueMaxUsd.Value)
+        {
+            return RoundMoneyDown(Math.Max(SuggestedTargetPriceUsd.Value, EstimatedFairValueMaxUsd.Value));
+        }
+
         var premiumFactor = qualityAdjustment switch
         {
             >= 0.08m => 1.08m,
@@ -605,8 +610,11 @@ public sealed class PropertyAnalysis
             _ => 1m
         };
         var maxRecommended = EstimatedFairValueMaxUsd.Value * premiumFactor;
+        var cappedMaxRecommended = PriceUsd.HasValue
+            ? Math.Min(maxRecommended, PriceUsd.Value)
+            : maxRecommended;
 
-        return RoundMoneyDown(Math.Max(SuggestedTargetPriceUsd.Value, maxRecommended));
+        return RoundMoneyDown(Math.Min(PriceUsd!.Value, Math.Max(SuggestedTargetPriceUsd.Value, cappedMaxRecommended)));
     }
 
     private decimal CalculateFairValueAdjustment()
@@ -674,9 +682,11 @@ public sealed class PropertyAnalysis
             _ => "Los atributos de la unidad no cambian demasiado el benchmark base."
         };
 
-        if (MarketPosition == MarketPosition.Cheap)
+        if (EstimatedFairValueMinUsd.HasValue &&
+            PriceUsd.HasValue &&
+            PriceUsd.Value < EstimatedFairValueMinUsd.Value)
         {
-            return $"El valor publicado se encuentra aproximadamente un {absoluteDifferencePercent:N1}% {position} del promedio estimado para propiedades similares en {benchmark.Neighborhood} ({benchmark.AverageUsdPerSquareMeter:N0} USD/m2), por eso parece una oportunidad. {adjustmentText} El precio objetivo queda levemente por debajo del publicado para no poner en riesgo una oportunidad atractiva.";
+            return "El precio publicado se encuentra por debajo del rango estimado. Esto puede representar una oportunidad, pero no elimina la posibilidad de negociar. Usa el valor justo como respaldo para avanzar con confianza, no como motivo para pagar por encima del publicado.";
         }
 
         if (EstimatedFairValueMaxUsd.HasValue &&
